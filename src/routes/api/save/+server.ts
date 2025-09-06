@@ -7,8 +7,18 @@ import logger from '$lib/utils/logger';
 export async function POST({ request, getClientAddress }) {
   try {
     const { filename, content } = await request.json();
-    let filePath = path.resolve('static/markdown', filename);
+    const markdownDir = path.resolve('static/markdown');
+    let filePath = path.join(markdownDir, filename);
     let finalFilename = filename;
+
+    // Ensure the markdown directory exists
+    try {
+      await fs.access(markdownDir);
+    } catch (accessError) {
+      // Directory doesn't exist, create it
+      logger.info('Markdown directory not found, creating it...');
+      await fs.mkdir(markdownDir, { recursive: true });
+    }
 
     // If filename is 'new', generate a new filename based on the card ID
     if (filename === 'new') {
@@ -18,7 +28,7 @@ export async function POST({ request, getClientAddress }) {
 
       // Use the ID as the filename
       finalFilename = `${id}.md`;
-      filePath = path.resolve('static/markdown', finalFilename);
+      filePath = path.join(markdownDir, finalFilename);
     }
 
     await fs.writeFile(filePath, content, 'utf8');
