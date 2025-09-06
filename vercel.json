@@ -1,6 +1,7 @@
 {
   "version": 2,
   "outputDirectory": ".svelte-kit/output",
+  "buildCommand": "npm run build",
   "rewrites": [
     {
       "source": "/api/(.*)",

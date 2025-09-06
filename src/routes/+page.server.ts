@@ -6,6 +6,16 @@ export async function load() {
   try {
     // This code only runs on the server
     const markdownDir = path.resolve('static/markdown');
+
+    // Check if directory exists, create if it doesn't
+    try {
+      await fs.access(markdownDir);
+    } catch (accessError) {
+      // Directory doesn't exist, create it
+      console.log('Markdown directory not found, creating it...');
+      await fs.mkdir(markdownDir, { recursive: true });
+    }
+
     const files = await fs.readdir(markdownDir);
     // Filter only markdown files
     const markdownFiles = files.filter(file => file.endsWith('.md'));

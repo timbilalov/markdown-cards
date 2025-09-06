@@ -10,7 +10,8 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"generate-password": "npx tsx scripts/generatePasswordHash.ts"
+		"generate-password": "npx tsx scripts/generatePasswordHash.ts",
+		"prebuild": "node scripts/ensureStaticDir.js"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",
