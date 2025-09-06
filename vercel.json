@@ -11,14 +11,14 @@
       }
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "/src/routes/api/$1"
+      "source": "/api/(.*)",
+      "destination": "/src/routes/api/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/src/routes/$1"
+      "source": "/(.*)",
+      "destination": "/src/routes/$1"
     }
   ],
   "headers": [
