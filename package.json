@@ -25,6 +25,7 @@
 		"vite": "^7.0.4"
 	},
 	"dependencies": {
+		"@sveltejs/adapter-vercel": "^5.10.2",
 		"bcryptjs": "^3.0.2",
 		"dotenv": "^17.2.2",
 		"marked": "^16.2.1",
