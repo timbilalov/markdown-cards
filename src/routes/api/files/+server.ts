@@ -5,12 +5,10 @@ import logger from '$lib/utils/logger';
 
 export async function GET({ getClientAddress }) {
   try {
-    const markdownDir = path.resolve('static/markdown');
+    const markdownDir = 'static/markdown';
     logger.info('markdownDir debug', {
       markdownDir,
-      // root: __dirname,
       cwd: process.cwd(),
-      rootPath: path.resolve('/'),
       currentPath: path.resolve('./'),
       upperPath: path.resolve('../'),
     })
