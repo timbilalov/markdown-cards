@@ -10,7 +10,11 @@ const config = {
 	kit: {
 		// Using Vercel adapter for deployment to Vercel
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-		adapter: adapter()
+		adapter: adapter(),
+
+		files: {
+			assets: 'src/lib/data',
+		},
 	}
 };
 

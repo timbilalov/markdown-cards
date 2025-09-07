@@ -27,6 +27,10 @@ export function getMarkdownDir(): string {
     path.resolve('.svelte-kit/output/static/markdown'),
     path.resolve('build/src/lib/data/markdown'),
     path.resolve('dist/src/lib/data/markdown'),
+    path.resolve('src/lib/data/markdown'),
+    path.resolve('lib/data/markdown'),
+    path.resolve('data/markdown'),
+    path.resolve('markdown'),
 
     // Vercel specific paths
     path.resolve('.vercel/output/static/markdown'),
