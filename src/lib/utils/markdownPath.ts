@@ -31,11 +31,12 @@ export function getMarkdownDir(): string {
   // Check each path to see if it exists
   for (const possiblePath of possiblePaths) {
     try {
-      if (fs.existsSync(possiblePath)) {
-        return possiblePath;
-      }
+        console.log('possiblePath', possiblePath);
+        if (fs.existsSync(possiblePath)) {
+            return possiblePath;
+        }
     } catch (e) {
-      // Continue to next path if this one fails
+        // Continue to next path if this one fails
     }
   }
 
