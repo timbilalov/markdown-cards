@@ -7,7 +7,8 @@ const markdownDir = path.join('static', 'markdown');
 console.log('markdownDir', markdownDir);
 
 if (fs.existsSync(markdownDir)) {
-  console.log('static/markdown directory exists');
+  const files = fs.readdirSync(markdownDir);
+  console.log('static/markdown directory exists', files);
   process.exit(0);
 }
 
