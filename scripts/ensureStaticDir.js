@@ -4,7 +4,7 @@ import path from 'path';
 
 // Ensure the static/markdown directory exists
 const markdownDir = path.join('static', 'markdown');
-console.log('markdownDir', markdownDir);
+console.log('markdownDir', markdownDir, path.resolve(markdownDir));
 
 if (fs.existsSync(markdownDir)) {
   const files = fs.readdirSync(markdownDir);
