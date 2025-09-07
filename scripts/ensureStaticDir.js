@@ -3,7 +3,7 @@ import path from 'path';
 
 
 // Ensure the static/markdown directory exists
-const markdownDir = path.join('/', 'var', 'task', '.svelte-kit', 'output', 'static', 'markdown');
+const markdownDir = path.join('/', 'var', 'task', 'static', 'markdown');
 console.log('markdownDir', markdownDir);
 
 // Create the directory if it doesn't exist
