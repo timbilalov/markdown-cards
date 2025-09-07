@@ -2,8 +2,8 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import * as path from 'path';
 
-const markdownDir = path.resolve(__dirname, 'static/markdown');
-console.log(`path.resolve(__dirname, 'static/markdown')`, path.resolve(__dirname, 'static/markdown'), 'markdownDir', markdownDir);
+const markdownDir = path.resolve(__dirname, 'src/lib/data/markdown');
+console.log(`path.resolve(__dirname, 'src/lib/data/markdown')`, path.resolve(__dirname, 'src/lib/data/markdown'), 'markdownDir', markdownDir);
 
 export default defineConfig({
 	plugins: [sveltekit()],
@@ -14,7 +14,7 @@ export default defineConfig({
 	},
 	server: {
 		fs: {
-			allow: ['**/static/markdown']
+			allow: ['**/data/markdown']
 		}
 	}
 });

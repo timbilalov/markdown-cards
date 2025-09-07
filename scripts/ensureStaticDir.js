@@ -6,20 +6,20 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// For the script, we always use the root static directory
-const markdownDir = path.join(__dirname, '../static/markdown');
+// For the script, we always use the new data directory
+const markdownDir = path.join(__dirname, '../src/lib/data/markdown');
 console.log('markdownDir', markdownDir, path.resolve(markdownDir));
 
 if (fs.existsSync(markdownDir)) {
   const files = fs.readdirSync(markdownDir);
-  console.log('static/markdown directory exists', files);
+  console.log('src/lib/data/markdown directory exists', files);
   process.exit(0);
 }
 
 // Create the directory if it doesn't exist
 try {
   fs.mkdirSync(markdownDir, { recursive: true });
-  console.log('static/markdown directory ensured');
+  console.log('src/lib/data/markdown directory ensured');
 
   // Create a sample markdown file to ensure the directory is not empty
   const sampleFile = path.join(markdownDir, 'sample-card.md');
@@ -47,7 +47,7 @@ This is a sample card to ensure the markdown directory is not empty during deplo
   fs.writeFileSync(sampleFile, sampleContent);
   console.log('Sample card created', sampleFile);
 } catch (err) {
-  console.error('Error ensuring static/markdown directory:', err);
+  console.error('Error ensuring src/lib/data/markdown directory:', err);
   process.exit(1);
 }
 

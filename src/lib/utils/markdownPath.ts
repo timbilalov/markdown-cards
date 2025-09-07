@@ -3,7 +3,7 @@ import fs from 'fs';
 
 /**
  * Get the correct path to the markdown directory based on the environment
- * In development, it's in the root static directory
+ * In development, it's in the src/lib/data directory
  * In production/build, it might be in a different location
  */
 export function getMarkdownDir(): string {
@@ -15,15 +15,18 @@ export function getMarkdownDir(): string {
 
   // Define possible paths for the markdown directory
   const possiblePaths = [
-    // Development path
+    // Development path - new location
+    path.resolve('src/lib/data/markdown'),
+
+    // Previous development path - for backward compatibility
     path.resolve('static/markdown'),
 
     // Common production paths
-    path.resolve('.svelte-kit/output/client/static/markdown'),
+    path.resolve('.svelte-kit/output/client/src/lib/data/markdown'),
     path.resolve('.svelte-kit/output/client/markdown'),
     path.resolve('.svelte-kit/output/static/markdown'),
-    path.resolve('build/static/markdown'),
-    path.resolve('dist/static/markdown'),
+    path.resolve('build/src/lib/data/markdown'),
+    path.resolve('dist/src/lib/data/markdown'),
 
     // Vercel specific paths
     path.resolve('.vercel/output/static/markdown'),
@@ -43,5 +46,5 @@ export function getMarkdownDir(): string {
 
   // If none of the paths exist, log a warning and return the default path
   console.warn('Could not find markdown directory in any expected location, using default path');
-  return path.resolve('static/markdown');
+  return path.resolve('src/lib/data/markdown');
 }

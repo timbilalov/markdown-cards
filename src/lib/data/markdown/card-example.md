@@ -26,9 +26,13 @@ Card description rr.
 ## Meta
 
 ### ID
+
 card-001
+
 ### Created
-2025-08-31
-### Modified
+
 2025-08-31
 
+### Modified
+
+2025-09-07
