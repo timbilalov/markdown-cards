@@ -6,6 +6,14 @@ import logger from '$lib/utils/logger';
 export async function GET({ getClientAddress }) {
   try {
     const markdownDir = path.resolve('static/markdown');
+    logger.debug('markdownDir debug', {
+      markdownDir,
+      // root: __dirname,
+      cwd: process.cwd(),
+      rootPath: path.resolve('/'),
+      currentPath: path.resolve('./'),
+      upperPath: path.resolve('../'),
+    })
     const files = await fs.readdir(markdownDir);
     // Filter only markdown files
     const markdownFiles = files.filter(file => file.endsWith('.md'));
