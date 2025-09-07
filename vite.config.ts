@@ -14,7 +14,7 @@ export default defineConfig({
 	},
 	server: {
 		fs: {
-			allow: [markdownDir]
+			allow: ['**/static/markdown']
 		}
 	}
 });
