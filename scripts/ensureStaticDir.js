@@ -3,7 +3,7 @@ import path from 'path';
 
 
 // Ensure the static/markdown directory exists
-const markdownDir = path.join('/', 'var', 'task', 'static', 'markdown');
+const markdownDir = path.join('static', 'markdown');
 console.log('markdownDir', markdownDir);
 
 if (fs.existsSync(markdownDir)) {
