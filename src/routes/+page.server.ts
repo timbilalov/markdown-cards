@@ -1,11 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { parseMarkdown } from '$lib/utils/markdownParser';
+import { getMarkdownDir } from '$lib/utils/markdownPath';
 
 export async function load() {
   try {
     // This code only runs on the server
-    const markdownDir = path.resolve('static/markdown');
+    const markdownDir = getMarkdownDir();
 
     // Check if directory exists, create if it doesn't
     try {

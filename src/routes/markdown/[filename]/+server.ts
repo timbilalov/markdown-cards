@@ -1,11 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
 import logger from '$lib/utils/logger';
+import { getMarkdownDir } from '$lib/utils/markdownPath';
 
 export async function GET({ params, getClientAddress }) {
   try {
     const filename = params.filename;
-    const filePath = path.resolve('static/markdown', filename);
+    const markdownDir = getMarkdownDir();
+    const filePath = path.join(markdownDir, filename);
 
     // Verify that the file exists and is a markdown file
     if (!filename.endsWith('.md')) {

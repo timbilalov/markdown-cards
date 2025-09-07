@@ -1,9 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
+// Get the correct markdown directory path
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Ensure the static/markdown directory exists
-const markdownDir = path.join('static', 'markdown');
+// For the script, we always use the root static directory
+const markdownDir = path.join(__dirname, '../static/markdown');
 console.log('markdownDir', markdownDir, path.resolve(markdownDir));
 
 if (fs.existsSync(markdownDir)) {

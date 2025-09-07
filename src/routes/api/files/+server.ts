@@ -2,10 +2,11 @@ import fs from 'fs/promises';
 import path from 'path';
 import { json } from '@sveltejs/kit';
 import logger from '$lib/utils/logger';
+import { getMarkdownDir } from '$lib/utils/markdownPath';
 
 export async function GET({ getClientAddress }) {
   try {
-    const markdownDir = path.resolve('static/markdown');
+    const markdownDir = getMarkdownDir();
     logger.info('markdownDir debug', {
       markdownDir,
       cwd: process.cwd(),

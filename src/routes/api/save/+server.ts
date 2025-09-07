@@ -3,11 +3,12 @@ import path from 'path';
 import { json } from '@sveltejs/kit';
 import { parseMarkdown } from '$lib/utils/markdownParser';
 import logger from '$lib/utils/logger';
+import { getMarkdownDir } from '$lib/utils/markdownPath';
 
 export async function POST({ request, getClientAddress }) {
   try {
     const { filename, content } = await request.json();
-    const markdownDir = path.resolve('static/markdown');
+    const markdownDir = getMarkdownDir();
     let filePath = path.join(markdownDir, filename);
     let finalFilename = filename;
 
