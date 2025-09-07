@@ -3,8 +3,13 @@ import path from 'path';
 
 
 // Ensure the static/markdown directory exists
-const markdownDir = path.join('/', 'var', 'task', 'src', 'static', 'markdown');
+const markdownDir = path.join('/', 'var', 'task', 'static', 'markdown');
 console.log('markdownDir', markdownDir);
+
+if (fs.existsSync(markdownDir)) {
+  console.log('static/markdown directory exists');
+  process.exit(0);
+}
 
 // Create the directory if it doesn't exist
 try {
@@ -35,7 +40,7 @@ This is a sample card to ensure the markdown directory is not empty during deplo
 `;
 
   fs.writeFileSync(sampleFile, sampleContent);
-  console.log('Sample card created');
+  console.log('Sample card created', sampleFile);
 } catch (err) {
   console.error('Error ensuring static/markdown directory:', err);
   process.exit(1);

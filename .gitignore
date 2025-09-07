@@ -24,3 +24,4 @@ vite.config.ts.timestamp-*
 
 # Data
 static/markdown/*.md
+!static/markdown/card-example.md
