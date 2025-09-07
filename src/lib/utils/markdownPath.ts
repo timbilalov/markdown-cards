@@ -20,6 +20,7 @@ export function getMarkdownDir(): string {
 
     // Common production paths
     path.resolve('.svelte-kit/output/client/static/markdown'),
+    path.resolve('.svelte-kit/output/client/markdown'),
     path.resolve('.svelte-kit/output/static/markdown'),
     path.resolve('build/static/markdown'),
     path.resolve('dist/static/markdown'),
