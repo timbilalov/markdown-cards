@@ -1,24 +1,15 @@
 {
   "version": 2,
-  "builds": [
+  "outputDirectory": ".svelte-kit/output",
+  "buildCommand": "npm run build",
+  "rewrites": [
     {
-      "src": "package.json",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "static/**"
-        ]
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/src/routes/api/$1"
+      "source": "/api/(.*)",
+      "destination": "/src/routes/api/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/src/routes/$1"
+      "source": "/(.*)",
+      "destination": "/src/routes/$1"
     }
   ],
   "headers": [
