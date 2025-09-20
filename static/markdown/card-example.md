@@ -2,14 +2,18 @@
 
 ## Data
 
-Card description rr.
+- **Status:** Предстоящие
+- **Tags:** #tag1 #tag2 #tag3
+
+![](https://kot-pes.com/wp-content/uploads/2019/02/post_5c606d00523e3.jpg)
+
+Card description.
 
 ### First list heading
 
 - ~~Unordered list item 1~~
 - ~~Unordered list item 2~~
 - Unordered list item 3
-- asasdasd
 
 ### Second list heading
 

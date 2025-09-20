@@ -5,6 +5,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { isAuthenticated } from '../stores/cloudStore';
+  import type { Card } from '../utils/markdownSerializer';
 
   let showPreview = false;
   let slug = $page.params.slug;
@@ -110,6 +111,50 @@
           bind:value={$cardStore.description}
           placeholder="Card description"
         ></textarea>
+        <div class="data-fields">
+          <div class="data-field">
+            <label for="card-status">Status:</label>
+            <input
+              id="card-status"
+              type="text"
+              value={$cardStore.status || ''}
+              placeholder="Status"
+              on:input={(e) => {
+                const target = e.target as HTMLInputElement;
+                const status = target.value;
+                cardStore.update(store => store ? {...store, status} : store);
+              }}
+            />
+          </div>
+          <div class="data-field">
+            <label for="card-tags">Tags:</label>
+            <input
+              id="card-tags"
+              type="text"
+              value={($cardStore.tags || []).join(' ')}
+              placeholder="Tags (space separated)"
+              on:input={(e: Event) => {
+                const target = e.target as HTMLInputElement;
+                const tags = target.value.split(/\s+/).filter((tag: string) => tag.length > 0);
+                cardStore.update(store => store ? {...store, tags} : store);
+              }}
+            />
+          </div>
+          <div class="data-field">
+            <label for="card-image">Image URL:</label>
+            <input
+              id="card-image"
+              type="text"
+              value={$cardStore.image || ''}
+              placeholder="Image URL"
+              on:input={(e) => {
+                const target = e.target as HTMLInputElement;
+                const image = target.value;
+                cardStore.update(store => store ? {...store, image} : store);
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       <div class="sections">
@@ -260,5 +305,28 @@
     border-radius: 4px;
     padding: 0.5rem;
     margin-top: 0.5rem;
+  }
+
+  .data-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+  }
+
+  .data-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .data-field label {
+    font-weight: bold;
+  }
+
+  .data-field input {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
   }
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CardSection } from '../types';
+  import type { CardSection } from '../utils/markdownSerializer';
 
   export let section: CardSection;
   export let onItemChange: (items: { text: string; checked: boolean }[]) => void;

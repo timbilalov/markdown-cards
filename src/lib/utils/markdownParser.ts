@@ -1,4 +1,4 @@
-import type { Card } from '../types';
+import type { Card } from './markdownSerializer';
 
 export function parseMarkdown(markdown: string): Card {
   const lines = markdown.split('\n');
@@ -10,6 +10,9 @@ export function parseMarkdown(markdown: string): Card {
       modified: 0
     },
     description: '',
+    status: undefined,
+    tags: undefined,
+    image: undefined,
     sections: []
   };
 
@@ -125,9 +128,34 @@ export function parseMarkdown(markdown: string): Card {
       }
     }
 
-    // Parse description in data section
+    // Parse status, tags, and image in data section
     if (inDataSection && !currentSection) {
-      card.description += line.trim() + '\n';
+      // Parse status
+      if (line.startsWith('- **Status:**')) {
+        card.status = line.substring(13).trim(); // Remove "- **Status:** " prefix
+        continue;
+      }
+
+      // Parse tags
+      if (line.startsWith('- **Tags:**')) {
+        const tagsString = line.substring(11).trim(); // Remove "- **Tags:** " prefix
+        card.tags = tagsString.split(/\s+/).map(tag => tag.startsWith('#') ? tag.substring(1) : tag).filter(tag => tag.length > 0);
+        continue;
+      }
+
+      // Parse image
+      if (line.match(/^!\[.*\]\(.*\)(\r)?$/)) {
+        const match = line.match(/^!\[.*\]\((.*)\)(\r)?$/);
+        if (match) {
+          card.image = match[1];
+        }
+        continue;
+      }
+
+      // Parse description (only if it's not an empty line)
+      if (line.trim() !== '') {
+        card.description += line + '\n';
+      }
     }
   }
 

@@ -2,7 +2,7 @@ import { writable } from 'svelte/store';
 import { parseMarkdown } from '$lib/utils/markdownParser';
 import { serializeCard } from '../utils/markdownSerializer';
 import { browser } from '$app/environment';
-import type { Card } from '../types';
+import type { Card } from '../utils/markdownSerializer';
 import { cloudService } from '../services/cloudService';
 import { dbService } from '../services/dbService';
 import { loadCardFromCloud, saveCardToCloud } from './cloudStore';
@@ -92,6 +92,9 @@ export function createNewCard(title: string): Card {
       modified: Date.now()
     },
     description: '',
+    status: undefined,
+    tags: undefined,
+    image: undefined,
     sections: []
   };
 }
