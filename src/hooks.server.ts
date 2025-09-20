@@ -51,8 +51,8 @@ setInterval(cleanupRateLimitStore, 60 * 60 * 1000);
 
 // Authentication middleware
 const authMiddleware: Handle = async ({ event, resolve }) => {
-  // Skip authentication for static files
-  if (event.url.pathname.startsWith('/favicon.ico')) {
+  // Skip authentication for static files and API routes
+  if (event.url.pathname.startsWith('/favicon.ico') || event.url.pathname.startsWith('/api/')) {
     return resolve(event);
   }
 

@@ -1,13 +1,16 @@
-import { loadCard, createNewCard } from '$lib/stores/cardStore';
-import { cardStore } from '$lib/stores/cardStore';
+import type { PageLoad } from './$types';
+import { error } from '@sveltejs/kit';
 
-export async function load({ params }: { params: { slug: string } }) {
-  if (params.slug === 'new') {
-    // For new cards, we don't load from file, just initialize the store
-    const newCard = createNewCard('New Card');
-    cardStore.set(newCard);
-  } else {
-    await loadCard(params.slug);
+export const load: PageLoad = async ({ params }) => {
+  const { slug } = params;
+
+  if (!slug) {
+    throw error(404, 'Card not found');
   }
-  return {};
-}
+
+  // For server-side rendering, we'll return the slug
+  // The client will load the actual card data
+  return {
+    slug
+  };
+};

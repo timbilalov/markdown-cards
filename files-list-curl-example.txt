@@ -1,0 +1,1 @@
+curl -X GET --header 'Accept: application/json' --header 'Authorization: OAuth y0__xCJ0-F0GKygOiDbodSxFLRG8ZjYO1xx2odd_b5wSpI9dQv6' 'https://cloud-api.yandex.net/v1/disk/resources?path=md-cards'

@@ -1,13 +1,14 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { parseMarkdown } from '$lib/utils/markdownParser';
+import { serializeCard } from '$lib/utils/markdownSerializer';
 import logger from '$lib/utils/logger';
+import { cloudService } from '$lib/services/cloudService';
+import { dbService } from '$lib/services/dbService';
 
-export async function POST({ request, getClientAddress }) {
+export const POST: RequestHandler = async ({ request, url, getClientAddress }) => {
   try {
+    // Get filename and content from request body
     const { filename, content } = await request.json();
-    let filePath = path.resolve('static/markdown', filename);
     let finalFilename = filename;
 
     // If filename is 'new', generate a new filename based on the card ID
@@ -18,10 +19,27 @@ export async function POST({ request, getClientAddress }) {
 
       // Use the ID as the filename
       finalFilename = `${id}.md`;
-      filePath = path.resolve('static/markdown', finalFilename);
     }
 
-    await fs.writeFile(filePath, content, 'utf8');
+    // Save to local cache first
+    try {
+      const card = parseMarkdown(content);
+      await dbService.saveCard(card);
+    } catch (localError) {
+      console.error('Error saving to local cache:', localError);
+    }
+
+    // If cloud service is authenticated, save to cloud as well
+    if (cloudService.isAuthenticated()) {
+      try {
+        cloudService.setBasePath('md-cards');
+        await cloudService.uploadFileAtPath(finalFilename, content);
+      } catch (cloudError) {
+        console.error('Error saving to cloud:', cloudError);
+        // If cloud save fails but we're authenticated, this is an error
+        throw cloudError;
+      }
+    }
 
     // Log successful save
     logger.info('Card saved successfully', {
@@ -38,5 +56,6 @@ export async function POST({ request, getClientAddress }) {
     });
     return json({ success: false }, { status: 500 });
   }
-}
+};
+
 

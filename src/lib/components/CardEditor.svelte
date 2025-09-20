@@ -4,9 +4,12 @@
   import MarkdownPreview from './MarkdownPreview.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { isAuthenticated } from '../stores/cloudStore';
 
   let showPreview = false;
   let slug = $page.params.slug;
+  let saving = false;
+  let saveError: string | null = null;
 
   onMount(() => {
     // If we're creating a new card and there's no card in the store, create a new one
@@ -60,18 +63,35 @@
     });
   }
 
-  function save() {
-    // For new cards, use 'new' as the filename, otherwise use the slug
-    const filename = slug === 'new' ? 'new' : slug;
-    if (filename && $cardStore) {
-      saveCard(filename, $cardStore);
+  async function save() {
+    saving = true;
+    saveError = null;
+
+    try {
+      // For new cards, use the card ID as the filename, otherwise use the slug
+      const filename = slug === 'new' && $cardStore ? $cardStore.meta.id : slug;
+      if (filename && $cardStore) {
+        await saveCard(filename, $cardStore);
+      }
+    } catch (error) {
+      saveError = error instanceof Error ? error.message : 'Failed to save card';
+      console.error('Error saving card:', error);
+    } finally {
+      saving = false;
     }
   }
 </script>
 
 <div class="editor-container">
   <div class="toolbar">
-    <button on:click={save}>Save</button>
+    <button on:click={save} disabled={saving}>
+      {saving ? 'Saving...' : 'Save'}
+    </button>
+    {#if saveError}
+      <div class="save-error">
+        Error: {saveError}
+      </div>
+    {/if}
     <label>
       <input type="checkbox" bind:checked={showPreview}>
       Show Preview
@@ -231,5 +251,14 @@
     border-radius: 4px;
     background-color: #f9f9f9;
     cursor: not-allowed;
+  }
+
+  .save-error {
+    color: #dc3545;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
   }
 </style>

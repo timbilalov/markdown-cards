@@ -1,0 +1,44 @@
+{
+  "path": "disk:/md-cards",
+  "type": "dir",
+  "name": "md-cards",
+  "created": "2025-09-14T11:52:17+00:00",
+  "modified": "2025-09-14T11:52:17+00:00",
+  "_embedded": {
+    "path": "disk:/md-cards",
+    "limit": 20,
+    "offset": 0,
+    "sort": "",
+    "total": 1,
+    "items": [
+      {
+        "path": "disk:/md-cards/card-example.md",
+        "type": "file",
+        "name": "card-example.md",
+        "created": "2025-09-14T11:56:39+00:00",
+        "modified": "2025-09-14T11:56:39+00:00",
+        "size": 435,
+        "mime_type": "text/plain",
+        "md5": "0a6ff1984cfaf0306287896f4b1a715a",
+        "sha256": "870febc2a6df69f7070dbc8fb3e79eada3128a5f3d45dcdadf34328e45db3c78",
+        "media_type": "compressed",
+        "resource_id": "244869513:57595e1a0a809702b609af0d2601b9f8854d50e72dedc546629d496583c0722c",
+        "revision": 1757851000480481,
+        "comment_ids": {
+          "public_resource": "244869513:57595e1a0a809702b609af0d2601b9f8854d50e72dedc546629d496583c0722c",
+          "private_resource": "244869513:57595e1a0a809702b609af0d2601b9f8854d50e72dedc546629d496583c0722c"
+        },
+        "exif": {},
+        "antivirus_status": "clean",
+        "file": "https://downloader.disk.yandex.ru/disk/e33c9f2df4a70cb630414dfc1ab5bbbf0a051c1030539b59f7a62df5cef28222/68c6e5c0/MRfm-qEfnmabkjxUBfaUCxV8vgkzRNlACsBFA1VkZ5X8wz5eTHROKCy9L93NwhnRIPFXV2l4iuzNR9XdkNU2Qw%3D%3D?uid=244869513&filename=card-example.md&disposition=attachment&hash=&limit=0&content_type=text%2Fplain&owner_uid=244869513&fsize=435&hid=2954d26cffc0e1d34693caaef2de1841&media_type=compressed&tknv=v3&etag=0a6ff1984cfaf0306287896f4b1a715a"
+      }
+    ]
+  },
+  "resource_id": "244869513:5e4f26e9b3dbb09de31fd4aa657eaa1ed366562dde7aed2904cc37c1ddf6aa3a",
+  "revision": 1757850737623790,
+  "comment_ids": {
+    "public_resource": "244869513:5e4f26e9b3dbb09de31fd4aa657eaa1ed366562dde7aed2904cc37c1ddf6aa3a",
+    "private_resource": "244869513:5e4f26e9b3dbb09de31fd4aa657eaa1ed366562dde7aed2904cc37c1ddf6aa3a"
+  },
+  "exif": {}
+}

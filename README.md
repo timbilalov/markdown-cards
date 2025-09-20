@@ -1,6 +1,6 @@
 # Markdown Cards Application
 
-A secure, production-ready Markdown Cards application with authentication, rate limiting, and comprehensive logging.
+A secure, production-ready Markdown Cards application with authentication, rate limiting, comprehensive logging, and cloud storage integration.
 
 ## Features
 
@@ -10,6 +10,9 @@ A secure, production-ready Markdown Cards application with authentication, rate 
 - **Comprehensive Logging**: Detailed access logs for monitoring
 - **Security Headers**: Protection against common web vulnerabilities
 - **Vercel Deployment**: Optimized for Vercel deployment
+- **Cloud Storage Integration**: Yandex Disk integration for file storage and synchronization
+- **Offline Support**: Local caching with IndexedDB for offline access
+- **Dual Persistence**: Files stored both locally and in the cloud
 
 ## Prerequisites
 
@@ -36,6 +39,37 @@ A secure, production-ready Markdown Cards application with authentication, rate 
 
    This will create a `.env` file with the admin username and hashed password.
 
+## Cloud Storage Integration
+
+The application now supports cloud storage integration with Yandex Disk, providing:
+
+- Automatic synchronization of markdown cards between local storage and cloud
+- Offline access with local caching via IndexedDB
+- Dual persistence for data redundancy
+- Seamless authentication with Yandex OAuth
+
+### Setup
+
+1. Obtain a Yandex Disk OAuth token:
+   - Visit [Yandex OAuth](https://oauth.yandex.ru/)
+   - Create a new application or use an existing one
+   - Request `disk:read` and `disk:write` permissions
+   - Generate an OAuth token
+
+2. Configure the application with one of these methods:
+   - **Environment Variable**: Add `VITE_YANDEX_DISK_TOKEN=your_token` to your `.env` file
+   - **UI Authentication**: Enter your token in the authentication prompt on the main page
+
+### Usage
+
+Once configured, the application will automatically:
+- Sync files from your Yandex Disk `md-cards` folder on startup
+- Cache files locally for offline access
+- Upload changes to the cloud when saving
+- Handle network interruptions gracefully
+
+For detailed documentation on the cloud integration, see [cloud-integration-docs.md](cloud-integration-docs.md).
+
 ## Development
 
 To run the application in development mode:
@@ -53,7 +87,13 @@ The application requires the following environment variables:
 - `ADMIN_USERNAME`: The admin username for authentication
 - `ADMIN_PASSWORD_HASH`: The bcrypt hashed password for the admin user
 
-These are automatically generated when you run `npm run generate-password`.
+For cloud storage integration, you can also set:
+
+- `VITE_YANDEX_DISK_TOKEN`: Your Yandex Disk OAuth token (optional, can be entered via UI)
+- `VITE_YANDEX_DISK_BASE_PATH`: Base path in Yandex Disk for markdown cards (defaults to `md-cards`)
+
+The admin credentials are automatically generated when you run `npm run generate-password`.
+The cloud integration variables can be added to the `.env` file after generation.
 
 ## Deployment to Vercel
 
@@ -103,6 +143,11 @@ All endpoints require HTTP Basic Authentication:
 - `POST /api/save` - Save a card
 - `GET /api/files` - List all files
 
+Cloud integration endpoints (require Yandex Disk OAuth token):
+- `GET /api/cloud/files` - List files from Yandex Disk
+- `GET /api/cloud/download` - Download a file from Yandex Disk
+- `POST /api/cloud/upload` - Upload a file to Yandex Disk
+
 ## Logging
 
 The application logs various events for monitoring and debugging:
@@ -126,10 +171,17 @@ Logs are output to the console and can be viewed in the Vercel dashboard.
 - Static assets are served directly by Vercel's CDN
 
 ### Scalability
+
 - The application is stateless and can be scaled horizontally
 - Authentication is stateless (no sessions to manage)
 - Rate limiting uses an in-memory store that works well for single instances
 
+### Cloud Integration
+
+- Regularly rotate your Yandex Disk OAuth tokens
+- Monitor your Yandex Disk quota to avoid storage issues
+- Use the local cache for offline access when network connectivity is unreliable
+- Keep both local and cloud storage in sync by regularly saving changes
 ## Troubleshooting
 
 ### Authentication Issues
