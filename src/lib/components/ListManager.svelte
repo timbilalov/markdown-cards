@@ -79,13 +79,12 @@
           on:change={() => toggleChecked(index)}
         />
 
-        <input
-          type="text"
+        <textarea
           bind:value={item.text}
           on:input={(e) => updateItemText(index, (e.target as HTMLInputElement).value)}
           placeholder="List item"
           class={item.checked ? 'strikethrough' : ''}
-        />
+        ></textarea>
 
         <button on:click={() => removeItem(index)}>Remove</button>
       </div>
@@ -118,6 +117,12 @@
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+
+  textarea {
+    field-sizing: content;
+    background: none;
+    border: none;
   }
 
   .strikethrough {
