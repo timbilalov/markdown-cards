@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cardStore, saveCard, createNewCard } from '../stores/cardStore';
+  import { cardStore, saveCard, createNewCard, cardSaving, cardSaveError, isOffline, processOfflineQueue } from '../stores/cardStore';
   import ListManager from './ListManager.svelte';
   import MarkdownPreview from './MarkdownPreview.svelte';
   import { page } from '$app/stores';
@@ -11,12 +11,31 @@
   let slug = $page.params.slug;
   let saving = false;
   let saveError: string | null = null;
+  let offlineMode = false;
+
+  // Subscribe to store values
+  cardSaving.subscribe(value => {
+    saving = value;
+  });
+
+  cardSaveError.subscribe(value => {
+    saveError = value;
+  });
+
+  isOffline.subscribe(value => {
+    offlineMode = value;
+  });
 
   onMount(() => {
     // If we're creating a new card and there's no card in the store, create a new one
     if (slug === 'new' && !$cardStore) {
       const newCard = createNewCard('New Card');
       cardStore.set(newCard);
+    }
+
+    // Process any pending offline operations when online
+    if (!offlineMode && isAuthenticated) {
+      processOfflineQueue();
     }
   });
 
@@ -91,6 +110,11 @@
     {#if saveError}
       <div class="save-error">
         Error: {saveError}
+      </div>
+    {/if}
+    {#if offlineMode}
+      <div class="offline-warning">
+        Offline Mode: Changes will be synced when online
       </div>
     {/if}
     <label>
@@ -194,6 +218,16 @@
             <label for="card-modified">Modified:</label>
             <input id="card-modified" type="text" readonly value={new Date($cardStore.meta.modified).toISOString().split('T')[0]} />
           </div>
+          {#if $cardStore._metadata}
+            <div class="meta-field">
+              <label for="card-source">Data Source:</label>
+              <input id="card-source" type="text" readonly value={$cardStore._metadata.source} />
+            </div>
+            <div class="meta-field">
+              <label for="card-load-time">Load Time:</label>
+              <input id="card-load-time" type="text" readonly value={`${$cardStore._metadata.loadTime.toFixed(2)}ms`} />
+            </div>
+          {/if}
         </div>
       </div>
     </div>
@@ -214,7 +248,10 @@
   .toolbar {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 1rem;
   }
 
   .card-editor {
@@ -302,6 +339,15 @@
     color: #dc3545;
     background-color: #f8d7da;
     border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .offline-warning {
+    color: #856404;
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
     border-radius: 4px;
     padding: 0.5rem;
     margin-top: 0.5rem;

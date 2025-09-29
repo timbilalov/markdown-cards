@@ -1,56 +1,161 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { parseMarkdown } from '$lib/utils/markdownParser';
 import { serializeCard } from '../utils/markdownSerializer';
 import { browser } from '$app/environment';
 import type { Card } from '../utils/markdownSerializer';
 import { cloudService } from '../services/cloudService';
 import { dbService } from '../services/dbService';
+import { performanceMonitor } from '../services/performanceMonitor';
+import { offlineQueue } from '../services/offlineQueue';
 import { loadCardFromCloud, saveCardToCloud } from './cloudStore';
 
-export const cardStore = writable<Card | null>(null);
+// Card store with additional metadata
+export interface CardWithMetadata extends Card {
+  _metadata?: {
+    source: 'indexeddb' | 'cloud' | 'memory';
+    loadTime: number;
+  };
+}
+
+export const cardStore = writable<CardWithMetadata | null>(null);
+
+// Loading status
+export const cardLoading = writable<boolean>(false);
+export const cardLoadSource = writable<'indexeddb' | 'cloud' | 'memory' | null>(null);
+export const cardLoadTime = writable<number>(0);
+
+// Save status
+export const cardSaving = writable<boolean>(false);
+export const cardSaveError = writable<string | null>(null);
+export const isOffline = writable<boolean>(false);
 
 export async function loadCard(filename: string) {
   if (!browser) return;
 
+  cardLoading.set(true);
+  cardLoadSource.set(null);
+  const startTime = performance.now();
+
   try {
-    // First try to load from cloud with local caching
-    if (cloudService.isAuthenticated()) {
-      // We need to find the cloud file first
-      const response = await fetch('/api/cloud/files');
-
-      if (response.ok) {
-        const files = await response.json();
-        const file = files._embedded.items.find((f: any) => f.name === `${filename}.md`);
-
-        if (file) {
-          // Load card from cloud with local caching
-          const card = await loadCardFromCloud(file);
-          if (card) {
-            cardStore.set(card);
-            return;
-          }
-        }
-      }
-    }
-
-    // Fallback to local cache
+    // First try to load from IndexedDB for instant display
     const cachedCard = await dbService.getCard(filename);
     if (cachedCard) {
-      cardStore.set(cachedCard);
+      const cardWithMetadata: CardWithMetadata = {
+        ...cachedCard,
+        _metadata: {
+          source: 'indexeddb',
+          loadTime: performance.now() - startTime
+        }
+      };
+
+      cardStore.set(cardWithMetadata);
+      cardLoadSource.set('indexeddb');
+      cardLoadTime.set(performance.now() - startTime);
+
+      // If we're online, check if there's a newer version in the cloud
+      if (cloudService.isAuthenticated() && navigator.onLine) {
+        try {
+          // We need to find the cloud file first
+          const response = await fetch('/api/cloud/files');
+
+          if (response.ok) {
+            const files = await response.json();
+            const file = files._embedded.items.find((f: any) => f.name === `${filename}.md`);
+
+            if (file) {
+              const cloudModified = new Date(file.modified).getTime();
+
+              if (cloudModified > cachedCard.meta.modified) {
+                // Load updated version from cloud
+                const cloudCard = await loadCardFromCloud(file);
+                if (cloudCard) {
+                  const updatedCardWithMetadata: CardWithMetadata = {
+                    ...cloudCard,
+                    _metadata: {
+                      source: 'cloud',
+                      loadTime: performance.now() - startTime
+                    }
+                  };
+
+                  cardStore.set(updatedCardWithMetadata);
+                  cardLoadSource.set('cloud');
+                  cardLoadTime.set(performance.now() - startTime);
+
+                  await dbService.saveCard(cloudCard);
+                }
+              }
+            }
+          }
+        } catch (cloudError) {
+          console.warn('Could not check cloud for updated version:', cloudError);
+        }
+      }
+
+      cardLoading.set(false);
       return;
+    }
+
+    // If not in IndexedDB, try cloud if authenticated
+    if (cloudService.isAuthenticated()) {
+      try {
+        // We need to find the cloud file first
+        const response = await fetch('/api/cloud/files');
+
+        if (response.ok) {
+          const files = await response.json();
+          const file = files._embedded.items.find((f: any) => f.name === `${filename}.md`);
+
+          if (file) {
+            // Load card from cloud with local caching
+            const card = await loadCardFromCloud(file);
+            if (card) {
+              const cardWithMetadata: CardWithMetadata = {
+                ...card,
+                _metadata: {
+                  source: 'cloud',
+                  loadTime: performance.now() - startTime
+                }
+              };
+
+              cardStore.set(cardWithMetadata);
+              cardLoadSource.set('cloud');
+              cardLoadTime.set(performance.now() - startTime);
+              cardLoading.set(false);
+              return;
+            }
+          }
+        }
+      } catch (cloudError) {
+        console.warn('Could not load card from cloud:', cloudError);
+      }
     }
 
     // If not found anywhere, create a new card
     const newCard = createNewCard(filename);
-    cardStore.set(newCard);
+    const newCardWithMetadata: CardWithMetadata = {
+      ...newCard,
+      _metadata: {
+        source: 'memory',
+        loadTime: performance.now() - startTime
+      }
+    };
+
+    cardStore.set(newCardWithMetadata);
+    cardLoadSource.set('memory');
+    cardLoadTime.set(performance.now() - startTime);
+    cardLoading.set(false);
   } catch (error) {
     console.error('Error loading card:', error);
     cardStore.set(null);
+    cardLoading.set(false);
   }
 }
 
 export async function saveCard(filename: string, card: Card) {
   if (!browser) return;
+
+  cardSaving.set(true);
+  cardSaveError.set(null);
 
   // Update the modified timestamp
   const updatedCard = {
@@ -62,22 +167,48 @@ export async function saveCard(filename: string, card: Card) {
   };
 
   try {
-    // Save to both local cache and cloud
+    // Then try to save to cloud
     const success = await saveCardToCloud(updatedCard, `${filename}.md`);
     if (!success) {
-      throw new Error('Failed to save card to cloud');
+      // Even if cloud save fails, we have local persistence
+      isOffline.set(true);
+      // The operation has been queued for later sync
     }
-    cardStore.set(updatedCard);
+
+    // Update the store with the saved card
+    const cardWithMetadata: CardWithMetadata = {
+      ...updatedCard,
+      _metadata: {
+        source: 'indexeddb', // After save, card is in IndexedDB
+        loadTime: 0
+      }
+    };
+
+    cardStore.set(cardWithMetadata);
+    cardSaving.set(false);
   } catch (error) {
     console.error('Error saving card:', error);
-    // Even if cloud save fails, try to save locally
-    try {
-      await dbService.saveCard(updatedCard);
-      cardStore.set(updatedCard);
-    } catch (localError) {
-      console.error('Error saving card locally:', localError);
-    }
+    cardSaveError.set(error instanceof Error ? error.message : 'Failed to save card');
+
+    // Since we already saved to IndexedDB, we don't need to do it again
+    // Just update the UI to reflect offline status
+    const cardWithMetadata: CardWithMetadata = {
+      ...updatedCard,
+      _metadata: {
+        source: 'indexeddb',
+        loadTime: 0
+      }
+    };
+
+    cardStore.set(cardWithMetadata);
+    isOffline.set(true);
+
+    cardSaving.set(false);
   }
+
+  // Save to IndexedDB after cloud save
+  updatedCard.meta.modified = Date.now();
+  await dbService.saveCard(updatedCard);
 }
 
 export function createNewCard(title: string): Card {
@@ -103,3 +234,17 @@ function generateRandomId(): string {
   return 'card-' + Math.random().toString(36).substr(2, 9);
 }
 
+// Process offline queue
+export async function processOfflineQueue(): Promise<void> {
+  if (cloudService.isAuthenticated() && navigator.onLine) {
+    await offlineQueue.processQueue();
+  }
+}
+
+// Get card load performance metrics
+export function getCardLoadMetrics() {
+  return {
+    source: get(cardLoadSource),
+    loadTime: get(cardLoadTime)
+  };
+}

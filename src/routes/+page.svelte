@@ -1,59 +1,248 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { cloudFiles, isAuthenticated, syncFilesFromCloud } from '$lib/stores/cloudStore';
-  import { dbInitialized, initDB } from '$lib/stores/dbStore';
+  import { cloudFiles, isAuthenticated, syncFilesFromCloud, isOffline, loadCardFromCloud } from '$lib/stores/cloudStore';
+  import { dbInitialized, initDB, loadLocalCards } from '$lib/stores/dbStore';
+  import { performanceMonitor } from '$lib/services/performanceMonitor';
+  import { cacheManager } from '$lib/services/cacheManager';
   import type { CloudFile } from '$lib/types/cloud';
+  import type { Card } from '$lib/utils/markdownSerializer';
 
-  interface Card {
+  interface CardDisplay {
     id: string;
     title: string;
     modified: string;
+    source: 'indexeddb' | 'cloud' | 'filename' | 'mixed';
   }
 
-  let cards: Card[] = [];
+  let cards: CardDisplay[] = [];
   let loading = true;
+  let dbReady = false;
+  let offlineMode = false;
+  let loadSource: 'indexeddb' | 'cloud' | 'mixed' = 'cloud';
+  let loadTime = 0;
 
   onMount(async () => {
+    const startTime = performance.now();
+
     // Initialize the database
     await initDB();
+    dbReady = true;
 
-    // Try to sync files from cloud
-    await syncFilesFromCloud();
-    loading = false;
+    // Try to load cards from IndexedDB first for instant display
+    const localCards = await loadLocalCards();
+    let localCardMap: Map<string, Card> = new Map();
+
+    if (localCards.length > 0) {
+      // Create a map for easy lookup
+      localCards.forEach(card => {
+        localCardMap.set(card.meta.id, card);
+      });
+
+      cards = localCards.map(card => ({
+        id: card.meta.id,
+        title: card.title,
+        modified: new Date(card.meta.modified).toISOString(),
+        source: 'indexeddb'
+      }));
+
+      loadSource = 'indexeddb';
+      loadTime = performance.now() - startTime;
+      loading = false;
+
+      // Record performance metrics
+      performanceMonitor.recordCacheHit('main_page', true);
+    }
+
+    // Try to sync files from cloud for updated data
+    try {
+      await syncFilesFromCloud();
+
+      // If we loaded from IndexedDB, check if cloud has newer data
+      if (loadSource === 'indexeddb') {
+        // Compare timestamps between local and cloud data
+        let hasNewerCloudData = false;
+        const updatedCards: CardDisplay[] = [];
+        const cloudFileMap = new Map<string, CloudFile>();
+
+        // Create a map of cloud files for easy lookup
+        $cloudFiles
+          .filter((file: CloudFile) => file.name.endsWith('.md'))
+          .forEach((file: CloudFile) => {
+            const id = file.name.replace('.md', '');
+            cloudFileMap.set(id, file);
+          });
+
+        // Process all cloud files to determine what needs updating
+        for (const [id, file] of cloudFileMap) {
+          const cloudModified = new Date(file.modified).getTime();
+          const localCard = localCardMap.get(id);
+
+          if (localCard) {
+            // Compare modification times
+            const localModified = localCard.meta.modified;
+
+            // If cloud version is newer, mark it
+            if (cloudModified > localModified) {
+              hasNewerCloudData = true;
+              updatedCards.push({
+                id: id,
+                title: localCard.title, // Will be updated with actual title from cloud if we fetch it
+                modified: file.modified,
+                source: 'mixed' // Mixed because we're combining local and cloud data
+              });
+            } else {
+              // Local version is newer or same, keep it
+              updatedCards.push({
+                id: id,
+                title: localCard.title,
+                modified: new Date(localModified).toISOString(),
+                source: 'indexeddb'
+              });
+            }
+          } else {
+            // New card only in cloud
+            hasNewerCloudData = true;
+            updatedCards.push({
+              id: id,
+              title: id, // Will be updated with actual title from cloud if we fetch it
+              modified: file.modified,
+              source: 'cloud'
+            });
+          }
+        }
+
+        // Also check for local cards that don't exist in cloud (deleted in cloud)
+        for (const [id, localCard] of localCardMap) {
+          if (!cloudFileMap.has(id)) {
+            // Card exists locally but not in cloud, keep local version
+            // Only add if not already in updatedCards
+            if (!updatedCards.some(card => card.id === id)) {
+              updatedCards.push({
+                id: id,
+                title: localCard.title,
+                modified: new Date(localCard.meta.modified).toISOString(),
+                source: 'indexeddb'
+              });
+            }
+          }
+        }
+
+        // For cards with newer cloud data, fetch actual titles from cloud
+        if (hasNewerCloudData) {
+          for (const card of updatedCards) {
+            const file = cloudFileMap.get(card.id);
+            if (file && card.source === 'mixed') {
+              try {
+                // Load the actual card from cloud to get the real title
+                const cloudCard = await loadCardFromCloud(file);
+                if (cloudCard) {
+                  card.title = cloudCard.title;
+                }
+              } catch (error) {
+                console.warn(`Could not load card ${card.id} from cloud:`, error);
+                // Keep the existing title if we can't load from cloud
+              }
+            } else if (file && card.source === 'cloud') {
+              try {
+                // Load the actual card from cloud to get the real title
+                const cloudCard = await loadCardFromCloud(file);
+                if (cloudCard) {
+                  card.title = cloudCard.title;
+                }
+              } catch (error) {
+                console.warn(`Could not load card ${card.id} from cloud:`, error);
+                // Keep the filename as title if we can't load from cloud
+              }
+            }
+          }
+        }
+
+        // Update cards array with merged data
+        cards = updatedCards;
+        loadSource = 'mixed'; // Always set to mixed when we've checked both sources
+      }
+    } catch (error) {
+      console.warn('Could not sync with cloud:', error);
+      offlineMode = true;
+
+      // Even in offline mode, we still have mixed loading (tried both sources)
+      if (loadSource === 'indexeddb') {
+        loadSource = 'mixed';
+      }
+    }
+
+    // If we didn't get cards from IndexedDB, derive them from cloud files
+    if (cards.length === 0) {
+      // Derive cards from cloud files
+      cards = $cloudFiles
+        .filter((file: CloudFile) => file.name.endsWith('.md'))
+        .map((file: CloudFile) => {
+          // Extract ID from filename (remove .md extension)
+          const id = file.name.replace('.md', '');
+          // Use the filename as title initially
+          // In a more complete implementation, we'd parse the file to get the actual title
+          return {
+            id: id,
+            title: id,
+            modified: file.modified,
+            source: 'cloud'
+          };
+        });
+
+      loadSource = cards.length > 0 ? 'cloud' : 'indexeddb';
+      loadTime = performance.now() - startTime;
+      loading = false;
+
+      // Record performance metrics
+      performanceMonitor.recordCacheHit('main_page', false);
+    } else if (loadSource !== 'mixed') {
+      // We had cards from IndexedDB but didn't update from cloud
+      loadSource = 'mixed';
+      loadTime = performance.now() - startTime;
+      loading = false;
+    } else {
+      // We already set loadSource to 'mixed' in the cloud sync section
+      loadTime = performance.now() - startTime;
+      loading = false;
+    }
+
+    // Validate cache periodically
+    setTimeout(async () => {
+      await cacheManager.validateCache();
+    }, 5000); // Validate after 5 seconds
   });
-
-  // Derive cards from cloud files
-  $: cards = $cloudFiles
-    .filter((file: CloudFile) => file.name.endsWith('.md'))
-    .map((file: CloudFile) => {
-      // Extract ID from filename (remove .md extension)
-      const id = file.name.replace('.md', '');
-      // For now, we'll use the filename as title
-      // In a more complete implementation, we'd parse the file to get the actual title
-      return {
-        id: id,
-        title: id,
-        modified: file.modified
-      };
-    });
 </script>
 
 <div class="container">
   <div class="header">
     <h1>Markdown Cards</h1>
+    <div class="status-bar">
+      {#if loading}
+        <span class="status loading">Loading...</span>
+      {:else}
+        <span class="status success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
+      {/if}
+
+      {#if offlineMode}
+        <span class="status offline">Offline Mode</span>
+      {/if}
+    </div>
   </div>
 
-  {#if loading}
+  {#if loading && cards.length === 0}
     <div class="loading">Loading files...</div>
   {:else}
     <div class="card-list">
       {#if cards.length > 0}
         {#each cards as card}
-          <a href={`/card/${card.id}`} class="card">
+          <a href={`/card/${card.id}`} class="card" data-source={card.source}>
             <h2>{card.title}</h2>
             <p class="modified-date">
               Modified: {new Date(card.modified).toLocaleDateString()}
             </p>
+            <span class="source-indicator" title="Data source: {card.source}">
+              {card.source === 'indexeddb' ? '💾' : card.source === 'cloud' ? '☁️' : card.source === 'mixed' ? '🔄' : '📄'}
+            </span>
           </a>
         {/each}
       {:else if $isAuthenticated}
@@ -84,6 +273,35 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .status-bar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  .status {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+  }
+
+  .status.loading {
+    background-color: #e0e0e0;
+    color: #666;
+  }
+
+  .status.success {
+    background-color: #d4edda;
+    color: #155724;
+  }
+
+  .status.offline {
+    background-color: #f8d7da;
+    color: #721c24;
   }
 
   .loading {
@@ -107,6 +325,7 @@
     text-decoration: none;
     color: inherit;
     transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
   }
 
   .card:hover {
@@ -142,5 +361,12 @@
     font-size: 0.9rem;
     color: #6c757d;
     margin-top: 0.5rem;
+  }
+
+  .source-indicator {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    font-size: 1.2rem;
   }
 </style>

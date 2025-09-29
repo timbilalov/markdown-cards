@@ -1,6 +1,28 @@
 import type { CloudFileListResponse, CloudUploadUrlResponse } from '../types/cloud';
 import { dbService } from './dbService';
 
+// Error types for better error handling
+export class CloudError extends Error {
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = 'CloudError';
+  }
+}
+
+export class CloudAuthError extends CloudError {
+  constructor(message: string = 'Cloud authentication failed') {
+    super(message, 'AUTH_FAILED');
+    this.name = 'CloudAuthError';
+  }
+}
+
+export class CloudNetworkError extends CloudError {
+  constructor(message: string = 'Network error') {
+    super(message, 'NETWORK_ERROR');
+    this.name = 'CloudNetworkError';
+  }
+}
+
 export class CloudService {
   private readonly API_BASE = 'https://cloud-api.yandex.net/v1/disk';
   private accessToken: string | null = null;
@@ -42,86 +64,153 @@ export class CloudService {
 
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      // Handle specific error cases
+      if (response.status === 401 || response.status === 403) {
+        throw new CloudAuthError('Authentication failed');
+      }
+
+      if (response.status >= 500) {
+        throw new CloudNetworkError(`Server error: ${response.status}`);
+      }
+
+      throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
     }
     return await response.json();
+  }
+
+  // Utility function to handle network operations with retry logic
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    delay: number = 1000
+  ): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error as Error;
+
+        // Don't retry for authentication errors
+        if (error instanceof CloudAuthError) {
+          throw error;
+        }
+
+        // If this is the last attempt, throw the error
+        if (attempt === maxRetries) {
+          throw error;
+        }
+
+        // Wait before retrying with exponential backoff
+        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, attempt)));
+      }
+    }
+
+    throw lastError;
   }
 
   // Fetch list of files from Yandex Disk
   async listFiles(): Promise<CloudFileListResponse> {
     if (!this.accessToken) {
-      throw new Error('Access token not set');
+      throw new CloudAuthError('Access token not set');
     }
 
-    const url = `${this.API_BASE}/resources?path=${encodeURIComponent(this.basePath)}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders()
+    return await this.executeWithRetry(async () => {
+      const url = `${this.API_BASE}/resources?path=${encodeURIComponent(this.basePath)}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: this.getHeaders()
+      });
+
+      const data = await this.handleResponse<CloudFileListResponse>(response);
+
+      // Cache the file list in IndexedDB
+      if (data._embedded && data._embedded.items && Array.isArray(data._embedded.items)) {
+        for (const file of data._embedded.items) {
+          await dbService.saveCloudFile(file);
+        }
+      }
+
+      return data;
     });
-
-    const data = await this.handleResponse<CloudFileListResponse>(response);
-
-    // Cache the file list in IndexedDB
-    for (const file of data._embedded.items) {
-      await dbService.saveCloudFile(file);
-    }
-
-    return data;
   }
 
   // Download file content from Yandex Disk
   async downloadFile(fileUrl: string): Promise<string> {
     if (!this.accessToken) {
-      throw new Error('Access token not set');
+      throw new CloudAuthError('Access token not set');
     }
 
-    const response = await fetch(fileUrl, {
-      method: 'GET',
-      headers: this.getHeaders()
+    return await this.executeWithRetry(async () => {
+      const response = await fetch(fileUrl, {
+        method: 'GET',
+        headers: this.getHeaders()
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new CloudAuthError('Authentication failed');
+        }
+
+        if (response.status >= 500) {
+          throw new CloudNetworkError(`Server error: ${response.status}`);
+        }
+
+        throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+      }
+
+      return await response.text();
     });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    return await response.text();
   }
 
   // Get upload URL from Yandex Disk
   async getUploadUrl(filePath: string, overwrite: boolean = true): Promise<CloudUploadUrlResponse> {
     if (!this.accessToken) {
-      throw new Error('Access token not set');
+      throw new CloudAuthError('Access token not set');
     }
 
-    const fullPath = `${this.basePath}/${filePath}`;
-    const url = `${this.API_BASE}/resources/upload?path=${encodeURIComponent(fullPath)}&overwrite=${overwrite}`;
+    return await this.executeWithRetry(async () => {
+      const fullPath = `${this.basePath}/${filePath}`;
+      const url = `${this.API_BASE}/resources/upload?path=${encodeURIComponent(fullPath)}&overwrite=${overwrite}`;
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders()
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: this.getHeaders()
+      });
+
+      return await this.handleResponse<CloudUploadUrlResponse>(response);
     });
-
-    return await this.handleResponse<CloudUploadUrlResponse>(response);
   }
 
   // Upload file content to Yandex Disk
   async uploadFile(uploadUrl: string, fileContent: string): Promise<void> {
     if (!this.accessToken) {
-      throw new Error('Access token not set');
+      throw new CloudAuthError('Access token not set');
     }
 
-    const response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `OAuth ${this.accessToken}`,
-        'Content-Type': 'text/plain'
-      },
-      body: fileContent
+    return await this.executeWithRetry(async () => {
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `OAuth ${this.accessToken}`,
+          'Content-Type': 'text/plain'
+        },
+        body: fileContent
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new CloudAuthError('Authentication failed');
+        }
+
+        if (response.status >= 500) {
+          throw new CloudNetworkError(`Server error: ${response.status}`);
+        }
+
+        throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
   }
 
   // Upload a file in one step (get URL + upload)

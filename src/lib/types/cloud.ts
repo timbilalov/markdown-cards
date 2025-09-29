@@ -1,47 +1,31 @@
 export interface CloudFile {
   path: string;
-  type: 'file' | 'dir';
   name: string;
-  created: string;
-  modified: string;
-  size?: number;
+  modified: string; // ISO date string
+  size: number;
+  etag?: string;
+  type?: string;
   mime_type?: string;
-  md5?: string;
-  sha256?: string;
-  media_type?: string;
-  resource_id: string;
-  revision: number;
-  file?: string; // Download link
+  file?: string; // Download URL
 }
 
 export interface CloudFileListResponse {
+  _embedded?: {
+    items: CloudFile[];
+    limit: number;
+    offset: number;
+    total: number;
+  };
   path: string;
-  type: 'dir';
+  type: string;
   name: string;
   created: string;
   modified: string;
-  _embedded: {
-    path: string;
-    limit: number;
-    offset: number;
-    sort: string;
-    total: number;
-    items: CloudFile[];
-  };
-  resource_id: string;
-  revision: number;
 }
 
 export interface CloudUploadUrlResponse {
-  method: string;
   href: string;
-  templated: boolean;
-  operation_id: string;
-}
-
-export interface CloudConfig {
-  accessToken: string | null;
-  basePath: string;
+  method: string;
 }
 
 export interface SyncStatus {
