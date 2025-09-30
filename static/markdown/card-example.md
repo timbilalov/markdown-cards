@@ -7,7 +7,10 @@
 
 ![](https://kot-pes.com/wp-content/uploads/2019/02/post_5c606d00523e3.jpg)
 
-Card description.
+Card description paragraph 1.
+
+Card description paragraph 2 line 1.
+Card description paragraph 2 line 2.
 
 ### First list heading
 

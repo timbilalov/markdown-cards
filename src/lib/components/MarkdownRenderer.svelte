@@ -3,6 +3,12 @@
 
   export let markdown: string = '';
 
+  // Configure marked to handle newlines better
+  marked.setOptions({
+    breaks: true, // Convert single newlines to <br>
+    gfm: true // Use GitHub Flavored Markdown
+  });
+
   $: htmlContent = marked(markdown);
 </script>
 

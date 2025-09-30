@@ -20,9 +20,12 @@ export function parseMarkdown(markdown: string): Card {
   let inDataSection = false;
   let inMetaSection = false;
   let currentMetaField: keyof Card['meta'] | null = null;
+  let inDescription = true; // Start in description until we hit a section heading
 
   for (const line of lines) {
-    if (!line.trim()) continue;
+    if (!line.trim() && !inDescription) {
+      continue;
+    }
 
     // Parse title
     if (line.startsWith('# ') && !card.title) {
@@ -43,6 +46,7 @@ export function parseMarkdown(markdown: string): Card {
       inDataSection = false;
       inMetaSection = true;
       currentMetaField = null;
+      inDescription = false; // No longer in description
       continue;
     }
 
@@ -82,6 +86,7 @@ export function parseMarkdown(markdown: string): Card {
         type: 'unordered',
         items: []
       };
+      inDescription = false; // No longer in description
       continue;
     }
 
@@ -129,7 +134,7 @@ export function parseMarkdown(markdown: string): Card {
     }
 
     // Parse status, tags, and image in data section
-    if (inDataSection && !currentSection) {
+    if (inDataSection && !currentSection && inDescription) {
       // Parse status
       if (line.startsWith('- **Status:**')) {
         card.status = line.substring(13).trim(); // Remove "- **Status:** " prefix
@@ -152,9 +157,12 @@ export function parseMarkdown(markdown: string): Card {
         continue;
       }
 
-      // Parse description (only if it's not an empty line)
+      // Parse description (only if it's not an empty line and we're still in description)
       if (line.trim() !== '') {
         card.description += line + '\n';
+      } else if (card.description.trim() !== '') {
+        // Add a newline for paragraph separation
+        card.description += '\n';
       }
     }
   }
