@@ -31,6 +31,13 @@
     onItemChange(newItems);
   }
 
+  function toggleStrikethrough(index: number) {
+    const newItems = section.items.map((item: { text: string; checked: boolean }, i: number) =>
+      i === index ? { ...item, checked: !item.checked } : item
+    );
+    onItemChange(newItems);
+  }
+
   function setListType(type: 'unordered' | 'ordered' | 'checklist') {
     onTypeChange(type);
   }
@@ -73,11 +80,13 @@
   <div class="list-items">
     {#each section.items as item, index (index)}
       <div class="list-item">
-        <input
-          type="checkbox"
-          checked={item.checked}
-          on:change={() => toggleChecked(index)}
-        />
+        {#if section.type === 'checklist'}
+          <input
+            type="checkbox"
+            checked={item.checked}
+            on:change={() => toggleChecked(index)}
+          />
+        {/if}
 
         <textarea
           bind:value={item.text}
@@ -85,6 +94,10 @@
           placeholder="List item"
           class={item.checked ? 'strikethrough' : ''}
         ></textarea>
+
+        {#if section.type !== 'checklist'}
+          <button on:click={() => toggleStrikethrough(index)}>Strikethrough</button>
+        {/if}
 
         <button on:click={() => removeItem(index)}>Remove</button>
       </div>
