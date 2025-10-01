@@ -36,9 +36,10 @@ export const cloudPerformance = writable<{
   errorRate: 0
 });
 
-// Initialize authentication status based on cloud service
+// Initialize authentication status by checking with the server
 if (typeof window !== 'undefined') {
-  isAuthenticated.set(cloudService.isAuthenticated());
+  // Check authentication status with server on initialization
+  checkAuthStatus();
 }
 
 // Load files from IndexedDB cache
@@ -219,10 +220,48 @@ export async function initializeApp(): Promise<void> {
   }
 }
 
-// Set access token and update authentication status (kept for backward compatibility)
-export function setAccessToken(token: string | null): void {
-  cloudService.setAccessToken(token);
-  isAuthenticated.set(!!token);
+// Set authentication status
+export function setAuthenticationStatus(status: boolean): void {
+  isAuthenticated.set(status);
+}
+
+// Logout function
+export async function logout(): Promise<void> {
+  try {
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (response.ok) {
+      // Update authentication status
+      isAuthenticated.set(false);
+
+      // Clear cloud files
+      cloudFiles.set([]);
+    } else {
+      console.error('Logout failed');
+    }
+  } catch (error) {
+    console.error('Logout error:', error);
+  }
+}
+
+// Check authentication status with server
+export async function checkAuthStatus(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/auth/status');
+    const data = await response.json();
+    const isAuthenticatedStatus = data.authenticated;
+    isAuthenticated.set(isAuthenticatedStatus);
+    return isAuthenticatedStatus;
+  } catch (error) {
+    console.error('Error checking auth status:', error);
+    isAuthenticated.set(false);
+    return false;
+  }
 }
 
 // Derived store for markdown files only
