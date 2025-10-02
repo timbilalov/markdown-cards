@@ -13,6 +13,6 @@
   $: htmlContent = marked(markdown);
 </script>
 
-<div class="content">
+<div class="content my-4">
   {@html htmlContent}
 </div>

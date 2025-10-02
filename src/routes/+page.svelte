@@ -1,11 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { pageTitle } from '$lib/stores/titleStore';
   import { cloudFiles, isAuthenticated, syncFilesFromCloud, isOffline, loadCardFromCloud } from '$lib/stores/cloudStore';
   import { dbInitialized, initDB, loadLocalCards } from '$lib/stores/dbStore';
   import { performanceMonitor } from '$lib/services/performanceMonitor';
   import { cacheManager } from '$lib/services/cacheManager';
   import type { CloudFile } from '$lib/types/cloud';
   import type { Card } from '$lib/utils/markdownSerializer';
+
+  // Set the page title for the main page
+  pageTitle.set('MD Cards - Main Page');
 
   interface CardDisplay {
     id: string;

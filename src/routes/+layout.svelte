@@ -2,6 +2,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { onMount } from 'svelte';
 	import { initDB } from '$lib/stores/dbStore';
+	import { pageTitle } from '$lib/stores/titleStore';
 	import Header from '$lib/components/Header.svelte';
 
 	let { children } = $props();
@@ -19,6 +20,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
+	<title>{$pageTitle}</title>
 </svelte:head>
 
 <style>

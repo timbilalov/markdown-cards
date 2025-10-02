@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import CombinedCardView from '../../../lib/components/CombinedCardView.svelte';
   import MarkdownPreview from '../../../lib/components/MarkdownPreview.svelte';
-  import { loadCard, cardLoading, cardLoadSource, cardLoadTime, isOffline } from '../../../lib/stores/cardStore';
+  import { loadCard, cardLoading, cardLoadSource, cardLoadTime, isOffline, cardStore } from '../../../lib/stores/cardStore';
+  import { pageTitle } from '$lib/stores/titleStore';
   import { page } from '$app/stores';
   import { performanceMonitor } from '$lib/services/performanceMonitor';
 
@@ -16,6 +17,17 @@
   // Subscribe to store values
   cardLoading.subscribe(value => {
     loading = value;
+  });
+
+  // Update page title when card data changes
+  cardStore.subscribe((card) => {
+    if (card) {
+      pageTitle.set(card.title);
+    } else if (slug === 'new') {
+      pageTitle.set('New Card - MD Cards');
+    } else {
+      pageTitle.set('Card - MD Cards');
+    }
   });
 
   cardLoadSource.subscribe(value => {
@@ -69,9 +81,7 @@
     {#if viewMode === 'combined'}
       <CombinedCardView />
     {:else}
-      <div class="box my-4">
-        <MarkdownPreview />
-      </div>
+      <MarkdownPreview />
     {/if}
   {/if}
 </div>
