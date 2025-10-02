@@ -117,13 +117,11 @@ export async function loadCardFromCloud(file: CloudFile): Promise<Card | null> {
     }
 
     // If not in cache or outdated, download from cloud
-    const response = await fetch(`/api/cloud/download?path=${encodeURIComponent(file.path)}`);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    // Use cloudService to handle CORS properly
+    if (!file.file) {
+      throw new Error('File download URL is not available');
     }
-
-    const content = await response.text();
+    const content = await cloudService.downloadFile(file.file);
     const parsedCard = parseMarkdown(content);
     const card: Card = {
       ...parsedCard,

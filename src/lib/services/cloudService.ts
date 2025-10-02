@@ -138,30 +138,56 @@ export class CloudService {
 
   // Download file content from Yandex Disk
   async downloadFile(fileUrl: string): Promise<string> {
-    if (!this.accessToken) {
-      throw new CloudAuthError('Access token not set');
-    }
+    // When running on the client, use the proxy endpoint to avoid CORS issues
+    if (typeof window !== 'undefined') {
+      return await this.executeWithRetry(async () => {
+        // Use our proxy endpoint to avoid CORS issues
+        const proxyUrl = `/api/cloud/download?url=${encodeURIComponent(fileUrl)}`;
+        const response = await fetch(proxyUrl, {
+          method: 'GET'
+        });
 
-    return await this.executeWithRetry(async () => {
-      const response = await fetch(fileUrl, {
-        method: 'GET',
-        headers: this.getHeaders()
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            throw new CloudAuthError('Authentication failed');
+          }
+
+          if (response.status >= 500) {
+            throw new CloudNetworkError(`Server error: ${response.status}`);
+          }
+
+          throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+        }
+
+        return await response.text();
       });
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          throw new CloudAuthError('Authentication failed');
-        }
-
-        if (response.status >= 500) {
-          throw new CloudNetworkError(`Server error: ${response.status}`);
-        }
-
-        throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+    } else {
+      // Server-side: make direct request to Yandex Disk
+      if (!this.accessToken) {
+        throw new CloudAuthError('Access token not set');
       }
 
-      return await response.text();
-    });
+      return await this.executeWithRetry(async () => {
+        const response = await fetch(fileUrl, {
+          method: 'GET',
+          headers: this.getHeaders()
+        });
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            throw new CloudAuthError('Authentication failed');
+          }
+
+          if (response.status >= 500) {
+            throw new CloudNetworkError(`Server error: ${response.status}`);
+          }
+
+          throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+        }
+
+        return await response.text();
+      });
+    }
   }
 
   // Get upload URL from Yandex Disk

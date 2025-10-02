@@ -1,41 +1,38 @@
 import { cloudService } from '$lib/services/cloudService';
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = async ({ request, url }) => {
+export const GET: RequestHandler = async ({ url }) => {
   try {
     // Check if cloud service is authenticated (has access token)
     if (!cloudService.isAuthenticated()) {
       return new Response('Cloud service not configured', { status: 500 });
     }
 
-    // Get file path from query parameters
-    const filePath = url.searchParams.get('path');
+    // Get the file URL from query parameters
+    const fileUrl = url.searchParams.get('url');
 
-    if (!filePath) {
-      return new Response('Missing file path parameter', { status: 400 });
+    if (!fileUrl) {
+      return new Response('Missing required parameter: url', { status: 400 });
     }
 
-    // Get the file download URL first
-    const fileList = await cloudService.listFiles();
-    const file = fileList._embedded.items.find(item => item.path === filePath);
-
-    if (!file) {
-      return new Response('File not found', { status: 404 });
+    // Validate that the URL is a Yandex Disk URL
+    if (!fileUrl.startsWith('https://') ||
+        (!fileUrl.includes('disk.yandex.ru') &&
+         !fileUrl.includes('disk.yandex.com') &&
+         !fileUrl.includes('downloader.disk.yandex'))) {
+      return new Response('Invalid file URL. Only Yandex Disk URLs are allowed.', { status: 400 });
     }
 
-    // Check if file has a download link
-    if (!file.file) {
-      return new Response('File download link not available', { status: 500 });
-    }
+    // Download the file content using the cloud service
+    // This will use the server-side token and won't have CORS issues
+    const fileContent = await cloudService.downloadFile(fileUrl);
 
-    // Download file content from Yandex Disk
-    const content = await cloudService.downloadFile(file.file);
-
-    // Return file content
-    return new Response(content, {
+    // Return the file content
+    return new Response(fileContent, {
+      status: 200,
       headers: {
-        'Content-Type': 'text/plain',
-        'Content-Disposition': `inline; filename="${file.name}"`
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600' // Cache for 1 hour
       }
     });
   } catch (error: any) {
@@ -43,4 +40,3 @@ export const GET: RequestHandler = async ({ request, url }) => {
     return new Response(`Error downloading file: ${error.message}`, { status: 500 });
   }
 };
-
