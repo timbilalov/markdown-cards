@@ -94,7 +94,9 @@ const authMiddleware: Handle = async ({ event, resolve }) => {
   }
 
   // For form submissions, check CSRF token
-  if (event.request.method === 'POST' || event.request.method === 'PUT' || event.request.method === 'DELETE') {
+  // Skip CSRF check for API endpoints that are already protected by authentication
+  if ((event.request.method === 'POST' || event.request.method === 'PUT' || event.request.method === 'DELETE') &&
+      !event.url.pathname.startsWith('/api/cloud/upload')) {
     const csrfToken = event.cookies.get('csrf_token');
     const requestCSRF = event.request.headers.get('X-CSRF-Token') ||
                        (event.request.headers.get('content-type')?.includes('form') ?

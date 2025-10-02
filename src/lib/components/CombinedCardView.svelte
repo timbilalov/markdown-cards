@@ -130,11 +130,6 @@
         Error: {saveError}
       </div>
     {/if}
-    {#if offlineMode}
-      <div class="offline-warning">
-        Offline Mode: Changes will be synced when online
-      </div>
-    {/if}
   </div>
 
   {#if $cardStore}
@@ -157,7 +152,26 @@
         </div>
       </div>
 
-      <div class="card-content">
+      <div class="card-inner">
+        <div class="field">
+          <label class="label" for="image">Image</label>
+          <div class="control">
+            <input
+              type="text"
+              id="image"
+              bind:value={$cardStore.image}
+              placeholder="Image URL"
+              class="input"
+            />
+          </div>
+
+          {#if $cardStore.image}
+            <div class="card-image-preview">
+              <img src={$cardStore.image} alt="Card image" class="card-image" />
+            </div>
+          {/if}
+        </div>
+
         <div class="card-description">
           <textarea
             bind:value={$cardStore.description}
@@ -267,7 +281,7 @@
     align-items: center;
   }
 
-  .card-content {
+  .card-inner {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
@@ -361,5 +375,18 @@
     border-radius: 4px;
     padding: 0.5rem;
     margin-top: 0.5rem;
+  }
+
+  .card-image-preview {
+    margin: 1rem 0;
+  }
+
+  .card-image {
+    display: block;
+    max-width: 400px;
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   }
 </style>

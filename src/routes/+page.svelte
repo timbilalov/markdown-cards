@@ -17,6 +17,7 @@
     modified: string;
     source: 'indexeddb' | 'cloud' | 'filename' | 'mixed';
     status?: string;
+    image?: string;
   }
 
   // Define default kanban board statuses
@@ -93,7 +94,8 @@
         title: card.title,
         modified: new Date(card.meta.modified).toISOString(),
         source: 'indexeddb',
-        status: card.status
+        status: card.status,
+        image: card.image
       }));
 
       loadSource = 'indexeddb';
@@ -143,7 +145,8 @@
                 title: localCard.title, // Will be updated with actual title from cloud if we fetch it
                 modified: file.modified,
                 source: 'mixed', // Mixed because we're combining local and cloud data
-                status: localCard.status
+                status: localCard.status,
+                image: localCard.image // Will be updated with actual image from cloud if we fetch it
               });
             } else {
               // Local version is newer or same, keep it
@@ -152,7 +155,8 @@
                 title: localCard.title,
                 modified: new Date(localModified).toISOString(),
                 source: 'indexeddb',
-                status: localCard.status
+                status: localCard.status,
+                image: localCard.image
               });
             }
           } else {
@@ -163,7 +167,8 @@
               title: id, // Will be updated with actual title from cloud if we fetch it
               modified: file.modified,
               source: 'cloud',
-              status: undefined
+              status: undefined,
+              image: undefined // Will be updated with actual image from cloud if we fetch it
             });
           }
         }
@@ -179,7 +184,8 @@
                 title: localCard.title,
                 modified: new Date(localCard.meta.modified).toISOString(),
                 source: 'indexeddb',
-                status: localCard.status
+                status: localCard.status,
+                image: localCard.image
               });
             }
           }
@@ -195,6 +201,8 @@
                 const cloudCard = await loadCardFromCloud(file);
                 if (cloudCard) {
                   card.title = cloudCard.title;
+                  // @ts-ignore - image property exists on Card type
+                  card.image = cloudCard.image;
                 }
               } catch (error) {
                 console.warn(`Could not load card ${card.id} from cloud:`, error);
@@ -206,6 +214,8 @@
                 const cloudCard = await loadCardFromCloud(file);
                 if (cloudCard) {
                   card.title = cloudCard.title;
+                  // @ts-ignore - image property exists on Card type
+                  card.image = cloudCard.image;
                 }
               } catch (error) {
                 console.warn(`Could not load card ${card.id} from cloud:`, error);
@@ -247,7 +257,8 @@
             title: id,
             modified: file.modified,
             source: 'cloud',
-            status: undefined
+            status: undefined,
+            image: undefined
           };
         });
 
@@ -310,6 +321,11 @@
 
             {#each statusCards as card}
               <a href={`/card/${card.id}`} class="card" data-source={card.source}>
+                {#if card.image}
+                  <div class="card-image">
+                    <img src={card.image} alt="Card image" />
+                  </div>
+                {/if}
                 <div class="card-content">
                   <h3>{card.title}</h3>
                   <p class="modified-date">

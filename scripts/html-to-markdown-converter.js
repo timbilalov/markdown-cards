@@ -44,6 +44,30 @@
   }
 
   /**
+   * Extract the first image URL from the files list
+   * @param {HTMLElement} cardElement - The card element
+   * @returns {String|null} Image URL or null if not found
+   */
+  function extractFirstImage(cardElement) {
+    const filesList = cardElement.querySelector('[date-testid="files-list"]');
+
+    if (filesList) {
+      // Get the first child of the files list
+      const firstChild = filesList.firstElementChild;
+      if (firstChild) {
+        // Find the 'a' tag within the first child
+        const linkElement = firstChild.querySelector('a');
+        if (linkElement) {
+          // Extract the href attribute
+          return linkElement.getAttribute('href');
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Main converter function
    * @param {HTMLElement|String} cardElement - DOM element or selector string for the card
    * @returns {String} Markdown formatted string
@@ -119,8 +143,14 @@
         markdown += `- **Tags:** ${tags.join(' ')}\n`;
       }
 
-      if (cardStatus || cardId || tegs.length > 0) {
+      if (cardStatus || cardId || tags.length > 0) {
         markdown += `\n`;
+      }
+
+      // Extract images
+      const imageUrl = extractFirstImage(cardElement);
+      if (imageUrl) {
+        markdown += `![](${imageUrl})\n\n`;
       }
 
       // Extract description
