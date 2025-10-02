@@ -13,15 +13,6 @@
   $: htmlContent = marked(markdown);
 </script>
 
-<div class="markdown-preview">
+<div class="content">
   {@html htmlContent}
 </div>
-
-<style>
-  .markdown-preview {
-    padding: 20px;
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    background: white;
-  }
-</style>

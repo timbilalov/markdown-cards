@@ -21,5 +21,14 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<Header />
-{@render children?.()}
+<style>
+	.wrapper {
+		display: flex;
+		flex-direction: column;
+	}
+</style>
+
+<div class="wrapper">
+	<Header />
+	{@render children?.()}
+</div>

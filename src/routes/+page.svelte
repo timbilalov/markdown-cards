@@ -277,9 +277,8 @@
   });
 </script>
 
-<div class="container">
+<div class="container px-4">
   <div class="header">
-    <h1>Markdown Cards</h1>
     <div class="status-bar">
       {#if loading}
         <span class="status loading">Loading...</span>
@@ -336,12 +335,6 @@
 </div>
 
 <style>
-  .container {
-    max-width: 100%;
-    margin: 0 auto;
-    padding: 2rem;
-  }
-
   .header {
     display: flex;
     justify-content: space-between;

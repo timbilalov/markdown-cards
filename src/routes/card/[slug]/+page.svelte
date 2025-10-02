@@ -43,7 +43,7 @@
 </script>
 
 
-<div class="card-container">
+<div class="container px-4">
   {#if loading}
     <div class="loading">
       <p>Loading card...</p>
@@ -59,7 +59,7 @@
         <span class="status offline">Offline Mode - Changes will be synced when online</span>
       {/if}
 
-      <button class="toggle-view" on:click={toggleViewMode}>
+      <button class="button" on:click={toggleViewMode}>
         Switch to {viewMode === 'combined' ? 'Markdown' : 'Editor'} View
       </button>
     </div>
@@ -67,19 +67,13 @@
     {#if viewMode === 'combined'}
       <CombinedCardView />
     {:else}
-      <div class="markdown-preview-container">
+      <div class="box my-4">
         <MarkdownPreview />
       </div>
     {/if}
   {/if}
 </div>
 <style>
-  .card-container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
-  }
-
   .status-bar {
     display: flex;
     justify-content: space-between;
@@ -106,20 +100,6 @@
   }
 
 
-  .toggle-view {
-    background-color: #007bff;
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.875rem;
-  }
-
-  .toggle-view:hover {
-    background-color: #0056b3;
-  }
-
   .loading {
     display: flex;
     flex-direction: column;
@@ -136,14 +116,6 @@
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin-top: 1rem;
-  }
-
-  .markdown-preview-container {
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    padding: 1.5rem;
-    margin: 1rem 0;
   }
 
   @keyframes spin {

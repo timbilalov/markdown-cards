@@ -5,7 +5,6 @@
   import { get } from 'svelte/store';
 
   let username = 'User';
-  let showUserMenu = false;
   let authState = false;
 
   // Function to fetch user data
@@ -57,193 +56,95 @@
     goto('/login');
   }
 
-  function toggleUserMenu() {
-    showUserMenu = !showUserMenu;
+  function onBurgerClick() {
+    document.querySelector('.navbar-menu')?.classList.toggle('is-active');
+    document.querySelector('.navbar-burger')?.classList.toggle('is-active');
   }
-
-  function handleClickOutside(event: MouseEvent) {
-    const userMenu = document.querySelector('.user-menu');
-    const userButton = document.querySelector('.user-button');
-
-    if (userMenu && userButton &&
-        !userMenu.contains(event.target as Node) &&
-        !userButton.contains(event.target as Node)) {
-      showUserMenu = false;
-    }
-  }
-
-  onMount(() => {
-    document.addEventListener('click', handleClickOutside);
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-    };
-  });
 </script>
 
 <header class="header">
-  <div class="header-content">
-    <a href="/" class="logo-link" aria-label="Home">
-      <img
-        src="/images/markdown-icon.png"
-        alt="Markdown Cards Logo"
-        class="logo"
-      />
-    </a>
+  <nav class="navbar" role="navigation" aria-label="main navigation">
+    <div class="container p-4">
+      <div class="navbar-brand">
+        <div class="navbar-item">
+          <a href="/" class="logo-link" aria-label="Home">
+            <img
+              src="/images/markdown-icon.png"
+              alt="Markdown Cards Logo"
+              class="logo"
+            />
+            <span>Markdown Cards</span>
+          </a>
+        </div>
 
-    <div class="header-spacer"></div>
-
-    {#if authState}
-      <div class="user-section">
-        <button
-          class="user-button"
-          on:click={toggleUserMenu}
-          aria-haspopup="true"
-          aria-expanded={showUserMenu}
-        >
-          <span class="username">{username}</span>
+        <button class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbar-menu" on:click={onBurgerClick}>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
         </button>
-
-        {#if showUserMenu}
-          <div class="user-menu" role="menu">
-            <button
-              class="menu-item"
-              on:click={handleLogout}
-              role="menuitem"
-            >
-              <img src="/images/logout-icon.png" alt="" class="menu-icon" />
-              Sign Out
-            </button>
-          </div>
-        {/if}
       </div>
-    {:else}
-      <button
-        class="auth-button"
-        on:click={handleLogin}
-        aria-label="Sign in"
-      >
-        <img src="/images/login-icon.png" alt="Sign in" class="auth-icon" />
-      </button>
-    {/if}
-  </div>
+
+      <div class="navbar-menu" id="navbar-menu">
+        <div class="navbar-start">
+        </div>
+
+        <div class="navbar-end">
+          {#if authState}
+            <div class="navbar-item">
+              <span class="username">{username}</span>
+            </div>
+            <div class="navbar-item">
+              <button
+                class="button"
+                on:click={handleLogout}
+                role="menuitem"
+              >
+                <span class="icon">
+                  <i class="fa fa-sign-out"></i>
+                </span>
+                <span>Sign Out</span>
+              </button>
+            </div>
+          {:else}
+            <div class="navbar-item">
+              <button
+                class="button"
+                on:click={handleLogin}
+                aria-label="Sign in"
+              >
+                <span class="icon">
+                  <i class="fa fa-sign-in"></i>
+                </span>
+                <span>Sign In</span>
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </nav>
 </header>
 
 <style>
   .header {
-    background-color: #f8f9fa;
-    border-bottom: 1px solid #e9ecef;
-    padding: 0.5rem 1rem;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     position: sticky;
     top: 0;
     z-index: 100;
-  }
-
-  .header-content {
-    display: flex;
-    align-items: center;
-    max-width: 1200px;
-    margin: 0 auto;
+    margin-bottom: 20px;
   }
 
   .logo-link {
     display: flex;
     align-items: center;
     text-decoration: none;
+    gap: 10px;
+    color: inherit;
   }
 
   .logo {
     height: 40px;
     width: auto;
-  }
-
-  .header-spacer {
-    flex-grow: 1;
-  }
-
-  .auth-button {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0.5rem;
-    border-radius: 50%;
-    transition: background-color 0.2s;
-  }
-
-  .auth-button:hover {
-    background-color: #e9ecef;
-  }
-
-  .auth-icon {
-    width: 24px;
-    height: 24px;
-  }
-
-  .user-section {
-    position: relative;
-  }
-
-  .user-button {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: none;
-    border: 1px solid #ddd;
-    border-radius: 20px;
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .user-button:hover {
-    background-color: #e9ecef;
-  }
-
-  .username {
-    font-size: 0.875rem;
-    color: #333;
-    font-weight: 500;
-  }
-
-  .user-menu {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    background: white;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    margin-top: 0.5rem;
-    min-width: 150px;
-    z-index: 1000;
-  }
-
-  .menu-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: none;
-    background: none;
-    text-align: left;
-    cursor: pointer;
-    font-size: 0.875rem;
-    color: #333;
-  }
-
-  .menu-item:hover {
-    background-color: #f8f9fa;
-  }
-
-  .menu-icon {
-    width: 16px;
-    height: 16px;
-  }
-
-  @media (max-width: 768px) {
-    .user-button {
-      padding: 0.5rem;
-    }
   }
 </style>

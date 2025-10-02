@@ -122,7 +122,7 @@
 
 <div class="combined-card-view">
   <div class="toolbar">
-    <button on:click={save} disabled={saving}>
+    <button class="button" on:click={save} disabled={saving}>
       {saving ? 'Saving...' : 'Save'}
     </button>
     {#if saveError}
@@ -138,7 +138,7 @@
   </div>
 
   {#if $cardStore}
-    <div class="visual-card">
+    <div class="box">
       <div class="card-header">
         <input
           type="text"
@@ -177,7 +177,7 @@
                     placeholder="Section heading"
                     class="section-heading-input"
                   />
-                  <button on:click={() => removeSection(index)} class="remove-section-btn">Remove</button>
+                  <button on:click={() => removeSection(index)} class="button is-danger">Remove</button>
                 </div>
                 <div class="section-content">
                   <ListManager
@@ -191,7 +191,7 @@
           </div>
         {/if}
 
-        <button on:click={addSection} class="add-section-btn">Add Section</button>
+        <button on:click={addSection} class="button">Add Section</button>
 
         <div class="card-metadata">
           <div class="meta-item">
@@ -227,12 +227,6 @@
 </div>
 
 <style>
-  .combined-card-view {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
-  }
-
   .toolbar {
     display: flex;
     justify-content: space-between;
@@ -240,15 +234,6 @@
     margin-bottom: 20px;
     flex-wrap: wrap;
     gap: 1rem;
-  }
-
-  .visual-card {
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    padding: 1.5rem;
-    margin: 1rem 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   }
 
   .card-header {
@@ -350,35 +335,6 @@
   .section-heading-input:focus {
     outline: none;
     border-bottom-color: #007bff;
-  }
-
-  .remove-section-btn {
-    background-color: #dc3545;
-    color: white;
-    border: none;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.875rem;
-  }
-
-  .remove-section-btn:hover {
-    background-color: #c82333;
-  }
-
-  .add-section-btn {
-    background-color: #28a745;
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-    align-self: flex-start;
-  }
-
-  .add-section-btn:hover {
-    background-color: #218838;
   }
 
   .card-metadata {

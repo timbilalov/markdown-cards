@@ -44,8 +44,8 @@
 </script>
 
 <div class="list-manager">
-  <div class="list-type-selector">
-    <label>
+  <div class="radios list-type-selector">
+    <label class="radio">
       <input
         type="radio"
         name={radioGroupName}
@@ -55,7 +55,8 @@
       />
       Unordered
     </label>
-    <label>
+
+    <label class="radio">
       <input
         type="radio"
         name={radioGroupName}
@@ -65,7 +66,8 @@
       />
       Ordered
     </label>
-    <label>
+
+    <label class="radio">
       <input
         type="radio"
         name={radioGroupName}
@@ -92,19 +94,25 @@
           bind:value={item.text}
           on:input={(e) => updateItemText(index, (e.target as HTMLInputElement).value)}
           placeholder="List item"
-          class={item.checked ? 'strikethrough' : ''}
+          class={`item-text-content ${item.checked ? 'strikethrough' : ''}`}
         ></textarea>
 
-        {#if section.type !== 'checklist'}
-          <button on:click={() => toggleStrikethrough(index)}>Strikethrough</button>
-        {/if}
+        <div class="buttons are-small">
+          {#if section.type !== 'checklist'}
+            <button class="button" on:click={() => toggleStrikethrough(index)} aria-label="strikethrough" title="strikethrough">
+              <span class="fa fa-strikethrough"></span>
+            </button>
+          {/if}
 
-        <button on:click={() => removeItem(index)}>Remove</button>
+          <button class="button is-danger" on:click={() => removeItem(index)} aria-label="remove" title="remove">
+            <span class="fa fa-trash"></span>
+          </button>
+        </div>
       </div>
     {/each}
   </div>
 
-  <button on:click={addItem}>Add Item</button>
+  <button class="button" on:click={addItem}>Add Item</button>
 </div>
 
 <style>
@@ -115,8 +123,6 @@
   }
 
   .list-type-selector {
-    display: flex;
-    gap: 15px;
     margin-bottom: 10px;
   }
 
@@ -130,12 +136,35 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
+    padding-left: 20px;
+    position: relative;
+    min-height: 1.5rem;
+    align-items: flex-start;
   }
 
-  textarea {
+  .list-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 10px;
+    height: 1px;
+    background-color: currentColor;
+  }
+
+  .item-text-content {
     field-sizing: content;
     background: none;
     border: none;
+  }
+
+  .list-item:not(:focus-within) .buttons {
+    display: none;
+  }
+
+  .buttons {
+    transform: translateY(-4px);
   }
 
   .strikethrough {
