@@ -94,7 +94,7 @@
           bind:value={item.text}
           on:input={(e) => updateItemText(index, (e.target as HTMLInputElement).value)}
           placeholder="List item"
-          class={`item-text-content ${item.checked ? 'strikethrough' : ''}`}
+          class={`textarea item-text-content ${item.checked ? 'strikethrough' : ''}`}
         ></textarea>
 
         <div class="buttons are-small">
@@ -132,6 +132,10 @@
     gap: 8px;
   }
 
+  input, textarea {
+    color: inherit;
+  }
+
   .list-item {
     display: flex;
     align-items: center;
@@ -147,7 +151,7 @@
     content: '';
     position: absolute;
     left: 0;
-    top: 8px;
+    top: 10px;
     width: 10px;
     height: 1px;
     background-color: currentColor;
@@ -157,14 +161,20 @@
     field-sizing: content;
     background: none;
     border: none;
+    height: auto;
+    padding: 0;
+    min-height: 0;
+    width: auto;
+    min-width: 0;
+    resize: none;
+  }
+
+  .item-text-content:not(:focus) {
+    box-shadow: none;
   }
 
   .list-item:not(:focus-within) .buttons {
     display: none;
-  }
-
-  .buttons {
-    transform: translateY(-4px);
   }
 
   .strikethrough {

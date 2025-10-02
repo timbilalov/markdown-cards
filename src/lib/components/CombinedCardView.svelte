@@ -138,13 +138,13 @@
   </div>
 
   {#if $cardStore}
-    <div class="box">
-      <div class="card-header">
+    <div class="combined-card-view">
+      <div class="combined-card-header">
         <input
           type="text"
           bind:value={$cardStore.title}
           placeholder="Card title"
-          class="card-title-input"
+          class="card-title-input input"
         />
         <div class="card-meta">
           <span class="card-id">ID: {$cardStore.meta.id}</span>
@@ -152,7 +152,7 @@
             type="text"
             bind:value={$cardStore.status}
             placeholder="Status"
-            class="card-status-input"
+            class="input"
           />
         </div>
       </div>
@@ -162,20 +162,20 @@
           <textarea
             bind:value={$cardStore.description}
             placeholder="Card description"
-            class="description-input"
+            class="description-input textarea"
           ></textarea>
         </div>
 
         {#if $cardStore.sections && $cardStore.sections.length > 0}
           <div class="card-sections">
             {#each $cardStore.sections as section, index (index)}
-              <div class="card-section">
+              <div class="box">
                 <div class="section-header">
                   <input
                     type="text"
                     bind:value={section.heading}
                     placeholder="Section heading"
-                    class="section-heading-input"
+                    class="section-heading-input input"
                   />
                   <button on:click={() => removeSection(index)} class="button is-danger">Remove</button>
                 </div>
@@ -193,7 +193,7 @@
 
         <button on:click={addSection} class="button">Add Section</button>
 
-        <div class="card-metadata">
+        <div class="box">
           <div class="meta-item">
             <span class="meta-label">Created:</span>
             <span class="meta-value">{new Date($cardStore.meta.created).toLocaleString()}</span>
@@ -208,7 +208,7 @@
               type="text"
               value={($cardStore.tags || []).join(' ')}
               placeholder="Tags (space separated)"
-              class="tags-input"
+              class="input"
               on:input={(e: Event) => {
                 const target = e.target as HTMLInputElement;
                 const tags = target.value.split(/\s+/).filter((tag: string) => tag.length > 0);
@@ -236,27 +236,27 @@
     gap: 1rem;
   }
 
-  .card-header {
+  .combined-card-header {
     border-bottom: 1px solid #e0e0e0;
     padding-bottom: 1rem;
     margin-bottom: 1.5rem;
   }
 
   .card-title-input {
+    padding: 0;
+    border: none;
     font-size: 1.8rem;
     font-weight: 600;
     margin: 0 0 0.5rem 0;
-    color: #333;
-    width: 100%;
-    border: none;
-    outline: none;
-    background: transparent;
-    padding: 0;
+    height: auto;
   }
 
-  .card-title-input:focus {
-    background: #f5f5f5;
-    border-radius: 4px;
+  .card-title-input:not(:focus) {
+    box-shadow: none;
+  }
+
+  input, textarea {
+    color: inherit;
   }
 
   .card-meta {
@@ -265,13 +265,6 @@
     font-size: 0.9rem;
     color: #666;
     align-items: center;
-  }
-
-  .card-status-input {
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    padding: 0.2rem 0.5rem;
-    font-size: 0.9rem;
   }
 
   .card-content {
@@ -296,23 +289,17 @@
     padding: 0;
     font-family: inherit;
     font-size: 1rem;
-    resize: vertical;
+    resize: none;
+    min-height: 0;
+    height: auto;
 
     field-sizing: content;
     border: none;
     background: none;
   }
 
-  .description-input:focus {
-    outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
-  }
-
-  .card-section {
-    background: #f9f9f9;
-    border-radius: 6px;
-    padding: 1rem;
+  .description-input:not(:focus) {
+    box-shadow: none;
   }
 
   .section-header {
@@ -326,22 +313,9 @@
     font-size: 1.1rem;
     font-weight: 600;
     border: none;
-    border-bottom: 1px solid #ddd;
-    background: transparent;
-    padding: 0.2rem;
     width: 70%;
-  }
-
-  .section-heading-input:focus {
-    outline: none;
-    border-bottom-color: #007bff;
-  }
-
-  .card-metadata {
-    background: #f5f5f5;
-    border-radius: 6px;
-    padding: 1rem;
-    margin-top: 1rem;
+    padding: 0;
+    height: auto;
   }
 
   .meta-item {
@@ -363,13 +337,6 @@
   .meta-value {
     flex: 1;
     color: #666;
-  }
-
-  .tags-input {
-    flex: 1;
-    padding: 0.25rem 0.5rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
   }
 
   .no-card {

@@ -281,13 +281,13 @@
   <div class="header">
     <div class="status-bar">
       {#if loading}
-        <span class="status loading">Loading...</span>
+        <span class="tag">Loading...</span>
       {:else}
-        <span class="status success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
+        <span class="tag is-success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
       {/if}
 
       {#if offlineMode}
-        <span class="status offline">Offline Mode</span>
+        <span class="tag is-warning">Offline Mode</span>
       {/if}
     </div>
   </div>
@@ -295,30 +295,36 @@
   {#if loading && cards.length === 0}
     <div class="loading">Loading files...</div>
   {:else}
-    <div class="kanban-board">
+    <div class="kanban-board columns is-mobile">
       {#if cards.length > 0}
         {#each Object.entries(groupedCards) as [status, statusCards]}
-          <div class="kanban-column">
+          <div class="kanban-column column">
             <h2 class="column-title">
               {statusDisplayNames[status] || status}
               <span class="card-count">({statusCards.length})</span>
             </h2>
-            <div class="card-list">
-              {#each statusCards as card}
-                <a href={`/card/${card.id}`} class="card" data-source={card.source}>
+
+            {#each statusCards as card}
+              <a href={`/card/${card.id}`} class="card" data-source={card.source}>
+                <div class="card-content">
                   <h3>{card.title}</h3>
                   <p class="modified-date">
                     Modified: {new Date(card.modified).toLocaleDateString()}
                   </p>
                   <span class="source-indicator" title="Data source: {card.source}">
-                    {card.source === 'indexeddb' ? '💾' : card.source === 'cloud' ? '☁️' : card.source === 'mixed' ? '🔄' : '📄'}
+                    <span class="icon">
+                      <span class="fa {card.source === 'indexeddb' ? 'fa-floppy-o' : card.source === 'cloud' ? 'fa-cloud' : card.source === 'mixed' ? 'fa-refresh' : 'fa-file'}"></span>
+                    </span>
                   </span>
-                </a>
-              {/each}
-              <a href="/card/new" class="card new-card">
-                <h3>+ New Card</h3>
+                </div>
               </a>
-            </div>
+            {/each}
+
+            <a href="/card/new" class="card">
+              <div class="card-content">
+                <h3>+ New Card</h3>
+              </div>
+            </a>
           </div>
         {/each}
       {:else if $isAuthenticated}
@@ -351,27 +357,6 @@
     flex-wrap: wrap;
   }
 
-  .status {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.875rem;
-  }
-
-  .status.loading {
-    background-color: #e0e0e0;
-    color: #666;
-  }
-
-  .status.success {
-    background-color: #d4edda;
-    color: #155724;
-  }
-
-  .status.offline {
-    background-color: #f8d7da;
-    color: #721c24;
-  }
-
   .loading {
     text-align: center;
     padding: 2rem;
@@ -380,7 +365,6 @@
   }
 
   .kanban-board {
-    display: flex;
     overflow-x: auto;
     gap: 1rem;
     padding: 1rem 0;
@@ -388,9 +372,10 @@
 
   .kanban-column {
     min-width: 300px;
-    background-color: #f8f9fa;
-    border-radius: 8px;
-    padding: 1rem;
+  }
+
+  .card {
+    display: block;
   }
 
   .column-title {
@@ -404,43 +389,6 @@
     font-size: 0.9rem;
     color: #6c757d;
     margin-left: 0.5rem;
-  }
-
-  .card-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .card {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 1rem;
-    text-decoration: none;
-    color: inherit;
-    transition: transform 0.2s, box-shadow 0.2s;
-    position: relative;
-    background-color: white;
-  }
-
-  .card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-  }
-
-  .new-card {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #f8f9fa;
-    color: #6c757d;
-    font-weight: bold;
-    min-height: 100px;
-  }
-
-  .new-card:hover {
-    background-color: #e9ecef;
-    color: #495057;
   }
 
   .no-cards {

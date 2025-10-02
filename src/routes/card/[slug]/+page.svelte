@@ -47,16 +47,18 @@
   {#if loading}
     <div class="loading">
       <p>Loading card...</p>
-      <div class="spinner"></div>
+      <div class="icon">
+        <span class="fa fa-spinner fa-pulse"></span>
+      </div>
     </div>
   {:else}
     <div class="status-bar">
       {#if loadSource}
-        <span class="status success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
+        <span class="tag is-success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
       {/if}
 
       {#if offlineMode}
-        <span class="status offline">Offline Mode - Changes will be synced when online</span>
+        <span class="tag is-warning">Offline Mode - Changes will be synced when online</span>
       {/if}
 
       <button class="button" on:click={toggleViewMode}>
@@ -83,43 +85,11 @@
     gap: 1rem;
   }
 
-  .status {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.875rem;
-  }
-
-  .status.success {
-    background-color: #d4edda;
-    color: #155724;
-  }
-
-  .status.offline {
-    background-color: #f8d7da;
-    color: #721c24;
-  }
-
-
   .loading {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 2rem;
-  }
-
-  .spinner {
-    width: 40px;
-    height: 40px;
-    border: 4px solid #f3f3f3;
-    border-top: 4px solid #007bff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-top: 1rem;
-  }
-
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
   }
 </style>

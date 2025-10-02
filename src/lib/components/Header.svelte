@@ -147,4 +147,10 @@
     height: 40px;
     width: auto;
   }
+
+  @media (prefers-color-scheme: dark) {
+    .logo {
+      filter: invert(1);
+    }
+  }
 </style>
