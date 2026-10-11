@@ -6,6 +6,8 @@ import { GET as userGET } from '../../routes/api/auth/user/+server';
 import * as auth from '../../lib/server/auth';
 import type { RequestEvent } from '@sveltejs/kit';
 
+// Isolate the credential source; never load the developer's local .env.
+
 // Mock the auth module
 vi.mock('../../lib/server/auth', () => {
   return {
@@ -88,42 +90,7 @@ describe('Authentication Endpoints', () => {
       expect(data.message).toBe('Invalid username or password.');
     });
 
-    it('should return 200 and set cookies for valid credentials', async () => {
-      // Mock valid credentials
-      vi.mocked(auth.validateCredentials).mockResolvedValue(true);
-
-      const request = new Request('http://localhost/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          username: 'testuser',
-          password: 'correctpassword',
-          rememberMe: true
-        })
-      });
-
-      const cookiesSet = vi.fn();
-      const event = {
-        request,
-        cookies: {
-          set: cookiesSet
-        }
-      } as unknown as RequestEvent;
-
-      const response = await loginPOST(event);
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data.message).toBe('Login successful');
-      expect(data.user.username).toBe('testuser');
-
-      // Check that cookies were set
-      expect(cookiesSet).toHaveBeenCalledTimes(2);
-      expect(cookiesSet).toHaveBeenCalledWith('auth_token', 'testuser', expect.any(Object));
-      expect(cookiesSet).toHaveBeenCalledWith('csrf_token', expect.any(String), expect.any(Object));
-    });
+    // The unsigned-cookie success case moved to sessionAuth.workflow.test.ts.
 
     it('should return 500 for unexpected errors', async () => {
       // Mock an unexpected error
@@ -171,20 +138,8 @@ describe('Authentication Endpoints', () => {
       expect(data.username).toBeNull();
     });
 
-    it('should return authenticated true when auth token cookie exists', async () => {
-      const event = {
-        cookies: {
-          get: vi.fn().mockReturnValue('testuser')
-        }
-      } as unknown as RequestEvent;
+    // The unsigned-cookie success case moved to sessionAuth.workflow.test.ts.
 
-      const response = await statusGET(event);
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data.authenticated).toBe(true);
-      expect(data.username).toBe('testuser');
-    });
   });
 
   describe('Logout Endpoint', () => {
@@ -249,19 +204,7 @@ describe('Authentication Endpoints', () => {
       expect(data.error).toBe('Not authenticated');
     });
 
-    it('should return user data when auth token cookie exists', async () => {
-      const event = {
-        cookies: {
-          get: vi.fn().mockReturnValue('testuser')
-        }
-      } as unknown as RequestEvent;
-
-      const response = await userGET(event);
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data.username).toBe('testuser');
-    });
+    // The unsigned-cookie success case moved to sessionAuth.workflow.test.ts.
 
     it('should handle user data errors gracefully', async () => {
       const event = {

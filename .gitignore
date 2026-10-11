@@ -28,3 +28,7 @@ static/markdown/*.md
 
 # Examples
 examples/
+
+# Browser test artifacts
+/test-results
+/playwright-report

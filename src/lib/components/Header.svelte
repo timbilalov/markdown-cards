@@ -1,47 +1,24 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { onMount, onDestroy } from 'svelte';
-  import { isAuthenticated, logout, checkAuthStatus } from '$lib/stores/cloudStore';
-  import { get } from 'svelte/store';
+  import { onMount } from 'svelte';
+  import { isAuthenticated } from '$lib/stores/cloudStore';
+  import { app } from '$lib/stores/appFacade';
 
   let username = 'User';
-  let authState = false;
+  let menuOpen = false;
 
-  // Function to fetch user data
-  async function fetchUserData() {
-    if (get(isAuthenticated)) {
-      try {
-        const response = await fetch('/api/auth/user');
-        if (response.ok) {
-          const userData = await response.json();
-          username = userData.username;
-        }
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-      }
-    } else {
+  onMount(() => {
+    let request = 0;
+    const unsubscribe = isAuthenticated.subscribe(authenticated => {
+      const current = ++request;
       username = 'User';
-    }
-  }
-
-  // Subscribe to authentication state changes
-  const unsubscribe = isAuthenticated.subscribe((value) => {
-    authState = value;
-    // Update user data when auth state changes
-    fetchUserData();
-  });
-
-  // Fetch user data when component mounts
-  onMount(async () => {
-    await checkAuthStatus();
-
-    // Fetch user data after checking auth status
-    fetchUserData();
-  });
-
-  // Clean up subscription
-  onDestroy(() => {
-    unsubscribe();
+      if (authenticated) void fetch('/api/auth/user').then(async response => {
+        const data: unknown = response.ok ? await response.json() : null;
+        if (current === request && data && typeof data === 'object'
+          && 'username' in data && typeof data.username === 'string') username = data.username;
+      }).catch(() => {});
+    });
+    return () => { request++; unsubscribe(); };
   });
 
   async function handleLogin() {
@@ -49,21 +26,16 @@
   }
 
   async function handleLogout() {
-    await logout();
-    // Check auth status after logout to ensure state is updated
-    await checkAuthStatus();
+    await app.logout();
     // Redirect to login page after logout
     goto('/login');
   }
 
-  function onBurgerClick() {
-    document.querySelector('.navbar-menu')?.classList.toggle('is-active');
-    document.querySelector('.navbar-burger')?.classList.toggle('is-active');
-  }
+
 </script>
 
 <header class="header">
-  <nav class="navbar" role="navigation" aria-label="main navigation">
+  <nav class="navbar" aria-label="main navigation">
     <div class="container p-4">
       <div class="navbar-brand">
         <div class="navbar-item">
@@ -77,7 +49,7 @@
           </a>
         </div>
 
-        <button class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbar-menu" on:click={onBurgerClick}>
+        <button class="navbar-burger" class:is-active={menuOpen} aria-label="menu" aria-expanded={menuOpen} aria-controls="navbar-menu" on:click={() => menuOpen = !menuOpen}>
           <span aria-hidden="true"></span>
           <span aria-hidden="true"></span>
           <span aria-hidden="true"></span>
@@ -85,12 +57,12 @@
         </button>
       </div>
 
-      <div class="navbar-menu" id="navbar-menu">
+      <div class="navbar-menu" class:is-active={menuOpen} id="navbar-menu">
         <div class="navbar-start">
         </div>
 
         <div class="navbar-end">
-          {#if authState}
+          {#if $isAuthenticated}
             <div class="navbar-item">
               <span class="username">{username}</span>
             </div>
@@ -98,7 +70,6 @@
               <button
                 class="button"
                 on:click={handleLogout}
-                role="menuitem"
               >
                 <span class="icon">
                   <i class="fa fa-sign-out"></i>

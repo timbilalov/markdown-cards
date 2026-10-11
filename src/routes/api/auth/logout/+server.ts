@@ -1,11 +1,13 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
+import { verifySession } from '$lib/server/session';
 import logger from '$lib/utils/logger';
+
+const headers = { 'Cache-Control': 'private, no-store' };
 
 export const POST: RequestHandler = async ({ cookies, request }) => {
   try {
-    // Get the username from the auth cookie before deleting it
-    const username = cookies.get('auth_token');
+    const session = verifySession(cookies.get('auth_token'));
 
     // Delete auth cookie with the same options used when setting it
     cookies.delete('auth_token', {
@@ -23,20 +25,20 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
       sameSite: 'strict'
     });
 
-    if (username) {
+    if (session) {
       logger.info('User logged out', {
-        username,
+        username: session.username,
         ip: request.headers.get('x-forwarded-for') || 'unknown'
       });
     }
 
     // Return success response
-    return json({ message: 'Logout successful' });
-  } catch (error) {
-    logger.error('Logout error', { error });
+    return json({ message: 'Logout successful' }, { headers });
+  } catch {
+    logger.error('Logout error');
     return json(
       { message: 'An unexpected error occurred during logout.' },
-      { status: 500 }
+      { status: 500, headers }
     );
   }
 };

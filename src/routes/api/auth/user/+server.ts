@@ -1,26 +1,21 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
+import { verifySession } from '$lib/server/session';
 import logger from '$lib/utils/logger';
+
+const headers = { 'Cache-Control': 'private, no-store' };
 
 export const GET: RequestHandler = async ({ cookies }) => {
   try {
-    // Get the auth token from cookies
-    const authToken = cookies.get('auth_token');
+    const session = verifySession(cookies.get('auth_token'));
 
-    if (!authToken) {
-      return json({ error: 'Not authenticated' }, { status: 401 });
+    if (!session) {
+      return json({ error: 'Not authenticated' }, { status: 401, headers });
     }
 
-    // In this implementation, the auth token is the username
-    // In a more complex system, you might decode a JWT or look up user data
-    const user = {
-      username: authToken,
-      // You could add more user data here if needed
-    };
-
-    return json(user);
-  } catch (error) {
-    logger.error('Error fetching user data', { error });
-    return json({ error: 'Internal server error' }, { status: 500 });
+    return json({ username: session.username }, { headers });
+  } catch {
+    logger.error('Error fetching user data');
+    return json({ error: 'Internal server error' }, { status: 500, headers });
   }
 };

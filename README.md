@@ -1,204 +1,202 @@
-# Markdown Cards Application
+# Markdown Cards
 
-A secure, production-ready Markdown Cards application with authentication, rate limiting, comprehensive logging, and cloud storage integration.
+Личная канбан-доска для Markdown-заметок на Яндекс Диске. Файлы остаются обычным
+текстом: их можно читать и редактировать без приложения. IndexedDB хранит кеш и
+локальные изменения, ожидающие доставки; UI отдельно показывает сохранение
+локально и подтверждённое сохранение на Диске.
 
-## Features
+[Краткая сводка рефакторинга](REFACTORING_SUMMARY.md) — основные изменения
+и сравнение с прежней реализацией.
 
-- **Secure Authentication**: HTTP Basic Auth with encrypted credentials
-- **Rate Limiting**: 100 requests per hour per IP address
-- **HTTPS Enforcement**: Automatic redirect to HTTPS in production
-- **Comprehensive Logging**: Detailed access logs for monitoring
-- **Security Headers**: Protection against common web vulnerabilities
-- **Vercel Deployment**: Optimized for Vercel deployment
-- **Cloud Storage Integration**: Yandex Disk integration for file storage and synchronization
-- **Offline Support**: Local caching with IndexedDB for offline access
-- **Dual Persistence**: Files stored both locally and in the cloud
+## Запуск
 
-## Prerequisites
+Нужны Node из `.nvmrc` и npm из `package.json`.
 
-- Node.js (v16 or higher)
-- npm or yarn
+```sh
+nvm install
+nvm use
+npm ci
+```
 
-## Installation
+Создайте `.env` по `.env.example`, если его ещё нет, и заполните private-переменные:
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd md-cards-app
-   ```
+| Переменная | Значение |
+| --- | --- |
+| `ADMIN_USERNAME` | Логин единственного пользователя |
+| `ADMIN_PASSWORD_HASH` | bcrypt-хеш пароля |
+| `SESSION_SECRET` | Независимый случайный ключ: 64 шестнадцатеричных символа |
+| `CLOUD_STORAGE_PROVIDER` | `yandex` |
+| `YANDEX_DISK_TOKEN` | OAuth-токен Диска с доступом к чтению и записи |
+| `YANDEX_DISK_BASE_PATH` | Существующая папка, например `md-cards`, без `disk:/` |
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Generate admin credentials:
-   ```bash
-   npm run generate-password
-   ```
-
-   This will create a `.env` file with the admin username and hashed password.
-
-## Cloud Storage Integration
-
-The application now supports cloud storage integration with Yandex Disk, providing:
-
-- Automatic synchronization of markdown cards between local storage and cloud
-- Offline access with local caching via IndexedDB
-- Dual persistence for data redundancy
-- Seamless authentication with Yandex OAuth
-
-### Setup
-
-1. Obtain a Yandex Disk OAuth token:
-   - Visit [Yandex OAuth](https://oauth.yandex.ru/)
-   - Create a new application or use an existing one
-   - Request `disk:read` and `disk:write` permissions
-   - Generate an OAuth token
-
-2. Configure the application with one of these methods:
-   - **Environment Variable**: Add `VITE_YANDEX_DISK_TOKEN=your_token` to your `.env` file
-   - **UI Authentication**: Enter your token in the authentication prompt on the main page
-
-### Usage
-
-Once configured, the application will automatically:
-- Sync files from your Yandex Disk `md-cards` folder on startup
-- Cache files locally for offline access
-- Upload changes to the cloud when saving
-- Handle network interruptions gracefully
-
-For detailed documentation on the cloud integration, see [cloud-integration-docs.md](cloud-integration-docs.md).
-
-## Development
-
-To run the application in development mode:
-
-```bash
+```sh
+npm run generate-password
+node --input-type=module -e "import { randomBytes } from 'node:crypto'; console.log(randomBytes(32).toString('hex'))"
 npm run dev
 ```
 
-The application will be available at `http://localhost:5173`.
+Первая команда печатает случайный пароль и bcrypt-хеш, вторая — ключ сессии.
+Генератор ничего не записывает в `.env`. Для локального файла скопируйте значение
+из строки `Local .env`: символы `$` в хеше экранируются как `\$`, чтобы Vite не
+выполнил подстановку переменных. В окружение сервера/Vercel внесите **обычный хеш
+без обратных слешей**. После изменения `.env` перезапустите dev-сервер.
 
-## Environment Variables
+Откройте адрес, показанный Vite, и войдите с заданными логином и паролем.
+Пустой профиль сначала показывает имена облачных файлов; заголовки и статусы
+доски заполняются из локальных проекций и при обновлении кеша.
+Доска различает заметки по имени файла: сохранённые исходники и pending-снимки
+с одинаковым внутренним ID остаются отдельными заметками, pending-снимок имеет приоритет.
+После чтения свежего документа доска использует его заголовок и Status. До такого
+чтения свежесть кеша определяется сравнением дат; будущая пользовательская Modified
+может задерживать автоматическое обновление отображения.
 
-The application requires the following environment variables:
+## Формат и миграция
 
-- `ADMIN_USERNAME`: The admin username for authentication
-- `ADMIN_PASSWORD_HASH`: The bcrypt hashed password for the admin user
+Документ v1 начинается с `<!-- markdown-cards: 1 -->`, содержит заголовок, `## Data`
+и `## Meta`. В метаданных хранятся стабильный ID и даты Created/Modified в ISO UTC
+с миллисекундами. У каждой секции списка есть маркер
+`<!-- list-type: unordered|ordered|checklist -->` с одним конкретным типом.
+Пример полного документа — [тестовый образец v1](src/lib/tests/fixtures/v1-card.md).
+Имя файла и ID внутри документа могут различаться.
+Имя Markdown-файла должно иметь основание, пригодное для маршрута: `.md`,
+`..md` и `...md` не являются адресами заметок. При листинге такие файлы
+пропускаются, чтение и upload их отвергают.
 
-For cloud storage integration, you can also set:
+Парсер проверяет весь документ. Неизвестная версия, неподдерживаемая структура
+или некорректные данные открываются с исходным Markdown и запрещённым Save:
+приложение не отбрасывает неизвестный текст ради частичной перезаписи.
+Закешированный неподдерживаемый документ остаётся виден на локальной доске
+по имени файла с пометкой «Только чтение», даже если Card-проекция ещё не создана.
 
-- `VITE_YANDEX_DISK_TOKEN`: Your Yandex Disk OAuth token (optional, can be entered via UI)
-- `VITE_YANDEX_DISK_BASE_PATH`: Base path in Yandex Disk for markdown cards (defaults to `md-cards`)
+Для старых заметок:
 
-The admin credentials are automatically generated when you run `npm run generate-password`.
-The cloud integration variables can be added to the `.env` file after generation.
+1. Откройте заметку с Диска. При отсутствии версии появится **«Обновить формат»**.
+2. Нажмите кнопку: проверяемая миграция изменит текущий открытый документ.
+   Неоднозначный или неподдерживаемый исходник останется без изменений.
+3. Проверьте результат и нажмите **Save**. Он сохранит локальный снимок и отправит
+   новую версию по прежнему имени файла. Сама кнопка миграции ничего не отправляет;
+   без Save изменение открытого документа не переживает перезагрузку.
+4. После успешного сохранения и повторного открытия кнопки миграции больше нет.
 
-## Deployment to Vercel
+## Сохранение и восстановление
 
-1. Create a new project on [Vercel](https://vercel.com)
+Save одной транзакцией IndexedDB фиксирует Card, точный Markdown и операцию outbox
+с уникальным Save ID. Только после этого начинается отправка. Фоновые запуски
+при старте приложения, восстановлении сети и по таймеру используют тот же сценарий.
+Фоновая синхронизация и обновление кеша запускаются после подтверждения авторизации,
+останавливаются при выходе и возобновляются после входа. Пока сессии нет, локальные
+снимки и ожидающие отправки операции сохраняются. Web Locks обеспечивает одного
+отправителя между вкладками.
 
-2. Connect your Git repository to Vercel
+| Состояние | Поведение |
+| --- | --- |
+| Сохранено на Диске | Ответ об успехе получен, локальное подтверждение записано |
+| Сохранено локально / offline | Снимок сохранён; доставка продолжится при доступной сети |
+| Ошибка авторизации | Локальные данные сохранены; войдите и повторите синхронизацию |
+| Сервис недоступен, запись не началась | Возможен повтор с задержкой |
+| Конфликт | Удалённый исходник изменился; автоматическая перезапись остановлена |
+| Результат записи неизвестен | Запрос мог выполниться; слепой повтор запрещён, проверьте файл на Диске |
+| Провайдер не поддерживает запись | Локальная версия сохранена; документ не объявляется некорректным |
+| Локальную версию заменили | Доставка именно этой версии не подтверждена; другая вкладка сохранила более новую |
 
-3. Configure the environment variables in your Vercel project settings:
-   - `ADMIN_USERNAME` = `admin`
-   - `ADMIN_PASSWORD_HASH` = (the hash generated by the script)
+Перед обновлением сравниваем удалённый исходник с базой открытого документа.
+Следующий Save продолжает только явно известный редактору предыдущий Save;
+общая исходная версия двух вкладок сама по себе не разрешает перезапись.
+Яндекс-адаптер сейчас не предоставляет ревизии для атомарной условной записи:
+между этой проверкой и записью остаётся окно гонки. Создание использует
+`createOnly`, защищая уже существующий файл. История версий Диска остаётся способом
+восстановления предыдущей облачной версии.
 
-4. Set the build settings:
-   - Build Command: `npm run build`
-   - Output Directory: `.svelte-kit/output/client`
-   - Install Command: `npm install`
+Logout отменяет preflight обычного Save, ручного повтора и фоновой доставки.
+Уже начатая запись получает подтверждение либо неизвестный результат. Срок
+облачного HTTP-запроса в браузере — 30 секунд, всей операции Яндекс-адаптера —
+20 секунд, включая чтение тела ответа. Таймаут чтения допускает повтор;
+таймаут начатой записи блокирует слепую повторную отправку.
+Это лимиты ожидания приложения, не SLA Яндекс Диска: браузеру оставлен запас
+10 секунд на транспорт и обработку ответа. Листинг до 100 страниц проверен
+на 10 000 файлов с моделируемой задержкой 100 мс на страницу; более медленный
+провайдер может вернуть недоступность без частичного списка и без потери кеша.
+Повторное подтверждение действующей сессии не отменяет Save. Уход со страницы
+доски отменяет её запросы; фоновое обновление кеша имеет собственный срок жизни.
 
-5. Deploy the application
+Обычный Save и повторное открытие не разрешают конфликт или неизвестный результат
+принудительно. UI разрешения таких ситуаций — отдельная будущая функция. Локальный
+снимок сохраняется; очистка данных сайта может его уничтожить. Исторические записи
+старой очереди и снимки без Save ID сохраняются при обновлении БД, но автоматически
+не отправляются: у них нет надёжного контекста доставки.
 
-## Security Features
+Offline работает для уже загруженного приложения. Восстановление после перезапуска
+требует доступного app shell; service worker и cold-start offline пока отсутствуют.
+В браузере без Web Locks локальное сохранение доступно, облачная отправка блокируется
+с объяснением в UI.
+При отказе начальной загрузки IndexedDB приложение показывает ошибку и кнопку
+повторной загрузки. Страница входа доступна независимо от успешного открытия БД.
 
-### Authentication
-The application uses HTTP Basic Authentication to protect all routes. The credentials are:
-- Username: `admin`
-- Password: (generated during setup)
+## Устройство приложения
 
-### Rate Limiting
-The application implements rate limiting to prevent abuse:
-- 100 requests per hour per IP address
-- Automatic blocking of IPs that exceed the limit
-- Rate limit headers in responses
+| Слой | Назначение |
+| --- | --- |
+| `src/lib/domain` | Чистые типы, строгий кодек, миграция, проекция доски и переходы outbox |
+| `src/lib/application` | Общие сценарии load/save/retry и загрузка доски |
+| `src/lib/ports` | Контракты облачного и локального хранения |
+| `src/lib/adapters` | IndexedDB и HTTP-транспорт браузера |
+| `src/lib/server` | Private-конфигурация, сессии, Яндекс-адаптер и проверка ответов провайдера |
+| `src/lib/stores/appFacade.ts` | Действия UI; состояние находится в `appState` |
+| `src/lib/services` | Инициализация, жизненный цикл worker и обновление кеша |
 
-### HTTPS Enforcement
-In production environments, the application automatically redirects HTTP requests to HTTPS.
+Браузер обращается к `/api/cloud/files`, `/api/cloud/download` и `/api/cloud/upload`
+через серверную сессию. Единственный облачный метод записи —
+`CloudStoragePort.write({ path, source, createOnly })`. Markdown передаётся файловой
+частью multipart: браузер не меняет LF на CRLF, локальный снимок и отправленный
+исходник совпадают. Старые `/api/save`, `/api/files`, `/markdown/[filename]` удалены.
 
-### Security Headers
-The application includes several security headers to protect against common web vulnerabilities:
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-- `X-XSS-Protection: 1; mode=block`
-- `Strict-Transport-Security: max-age=31536000; includeSubDomains`
+## Deployment и безопасность
 
-## API Endpoints
+`npm run build` использует `@sveltejs/adapter-vercel` и создаёт `.vercel/output`.
+На Vercel задайте те же private-переменные, Node 24 и команду сборки `npm run build`.
+`vercel.json` не переопределяет output directory и не перенаправляет запросы в
+`src/routes`: маршрутизацию генерирует адаптер. Для иной платформы заменяется
+адаптер в `svelte.config.js`; domain/application от Vercel не зависят.
 
-All endpoints require HTTP Basic Authentication:
-- `GET /` - List all cards
-- `GET /card/[slug]` - View a specific card
-- `POST /api/save` - Save a card
-- `GET /api/files` - List all files
+Production требует HTTPS. Все экземпляры сервера должны использовать один
+`SESSION_SECRET`; его смена делает существующие сессии недействительными.
+Cookie сессии — HttpOnly, SameSite=Strict и Secure в production. Срок сессии —
+8 часов, с Remember me — 30 дней. Logout очищает cookie браузера, индивидуального
+серверного отзыва уже выданного токена пока нет.
 
-Cloud integration endpoints (require Yandex Disk OAuth token):
-- `GET /api/cloud/files` - List files from Yandex Disk
-- `GET /api/cloud/download` - Download a file from Yandex Disk
-- `POST /api/cloud/upload` - Upload a file to Yandex Disk
+Учётные данные не имеют префиксов `VITE_`/`PUBLIC_` и не попадают в клиентскую
+сборку. Авторизация и строгая проверка Origin выполняются до чтения тела записи.
+Пути ограничены папкой провайдера; клиент не передаёт download/upload URL.
+Сервер проверяет адреса, размеры и структуру ответов Диска. Лимит входного login
+JSON — 16 KiB, полного multipart-запроса — 1 MiB.
 
-## Logging
+Приватные страницы и API используют `private, no-store`; Markdown preview очищается
+DOMPurify. CSP разрешает bootstrap через nonce и один фиксированный стиль
+`#svelte-announcer` через точный хеш. При обновлении SvelteKit браузерные тесты
+проверяют совместимость этого исключения. Rate limiter хранится в памяти экземпляра
+и не является распределённой защитой. Он ограничивает вход и обращения к закрытым
+маршрутам без сессии; обычные облачные запросы с действующей сессией не расходуют
+этот бюджет.
 
-The application logs various events for monitoring and debugging:
-- Successful and failed login attempts
-- Rate limit exceeded events
-- General application events
+## Проверки
 
-Logs are output to the console and can be viewed in the Vercel dashboard.
+```sh
+npm run validate            # типы, unit/integration, production build
+npx playwright install chromium  # однократно для browser E2E
+npm run test:e2e
+```
 
-## Best Practices
+E2E строит текущие исходники во временной папке и запускает настоящий Chromium:
+production HTML/API/assets, реальная IndexedDB, Web Locks, cookies и CSP.
+Подменено внешнее облако: используется изолированный провайдер в памяти.
+Пользовательская `.env` и реальные заметки на Диске в тесты не копируются.
 
-### Security
-- Never commit the `.env` file to version control
-- Regularly rotate admin credentials
-- Monitor logs for suspicious activity
-- Keep dependencies up to date
+Проверяются миграция и Save, offline/reconnect с перезапуском страницы, конфликт,
+потерянное подтверждение upload, обновление БД v2 → v5 без очистки, мобильная доска
+и клавиатурная доступность. Unit/integration дополнительно проверяют обновление
+v3/v4, транзакционные отказы, гонки и отсутствие секретов в публичной сборке.
+Если Chromium уже установлен отдельно, путь можно задать переменной
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. Скриншоты/trace находятся в игнорируемой
+папке `test-results`.
 
-### Performance
-- The application uses efficient middleware with minimal overhead
-- Rate limiting prevents resource exhaustion
-- Static assets are served directly by Vercel's CDN
-
-### Scalability
-
-- The application is stateless and can be scaled horizontally
-- Authentication is stateless (no sessions to manage)
-- Rate limiting uses an in-memory store that works well for single instances
-
-### Cloud Integration
-
-- Regularly rotate your Yandex Disk OAuth tokens
-- Monitor your Yandex Disk quota to avoid storage issues
-- Use the local cache for offline access when network connectivity is unreliable
-- Keep both local and cloud storage in sync by regularly saving changes
-## Troubleshooting
-
-### Authentication Issues
-If you're having trouble with authentication:
-1. Verify the `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` environment variables are set correctly
-2. Generate new credentials with `npm run generate-password`
-3. Restart the application
-4. If the password hash appears truncated, check that the full hash is being loaded (the application uses a custom environment variable loader to handle long hash values correctly)
-
-### Rate Limiting Issues
-If you're being rate limited:
-1. The limit is 100 requests per hour per IP
-2. Wait for the rate limit to reset
-3. Check logs for rate limit events
-
-### Deployment Issues
-If you're having trouble deploying to Vercel:
-1. Ensure all environment variables are set in the Vercel project settings
-2. Check the build logs for errors
-3. Verify the build and output directory settings
+Границы и итог рефакторинга — в [REFACTORING_PLAN.md](REFACTORING_PLAN.md).

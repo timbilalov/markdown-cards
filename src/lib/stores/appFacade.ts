@@ -1,0 +1,26 @@
+import { get } from 'svelte/store';
+import { appState } from './appState';
+import { startApplication, initializeApplication } from '../services/appLifecycle';
+import { loadBoard, type BoardLoadState } from '../application/loadBoard';
+import * as cloud from './cloudStore';
+import * as database from './dbStore';
+import * as editor from './cardStore';
+
+// UI actions invoke application services. Named state views remain writable
+// for editor form bindings; storage and delivery decisions belong to use cases.
+export const app = {
+  state: appState,
+  start: startApplication,
+  initialize: initializeApplication,
+  async loadBoard(publish: (state: BoardLoadState) => void, signal: AbortSignal): Promise<void> {
+    await loadBoard({
+      init: initializeApplication, readLocal: database.loadLocalCards,
+      sync: cloud.syncFilesFromCloud, files: () => get(cloud.cloudFiles), load: cloud.loadCardFromCloud,
+      checkIsOffline: () => !navigator.onLine, cloudError: () => get(cloud.syncStatus).error,
+      clock: () => performance.now()
+    }, publish, signal);
+  },
+  loadCard: editor.loadCard, openNewCard: editor.openNewCard, resetCard: editor.resetCardDocument,
+  saveCard: editor.saveCard, migrateCard: editor.migrateCurrentCardFormat, retry: editor.processOfflineQueue,
+  logout: () => cloud.logout(), checkIsAuthenticated: () => cloud.checkIsSessionAuthenticated()
+};

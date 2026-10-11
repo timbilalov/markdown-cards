@@ -1,302 +1,41 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { pageTitle } from '$lib/stores/titleStore';
-  import { cloudFiles, isAuthenticated, syncFilesFromCloud, isOffline, loadCardFromCloud } from '$lib/stores/cloudStore';
-  import { dbInitialized, initDB, loadLocalCards } from '$lib/stores/dbStore';
-  import { performanceMonitor } from '$lib/services/performanceMonitor';
-  import { cacheManager } from '$lib/services/cacheManager';
-  import type { CloudFile } from '$lib/types/cloud';
-  import type { Card } from '$lib/utils/markdownSerializer';
+  import { app } from '$lib/stores/appFacade';
+  import { isAuthenticated } from '$lib/stores/cloudStore';
+  import { deriveBoardColumns } from '$lib/domain/board';
+  import type { BoardCard, BoardColumn } from '$lib/domain/types';
 
-  // Set the page title for the main page
   pageTitle.set('MD Cards - Main Page');
 
-  interface CardDisplay {
-    id: string;
-    title: string;
-    modified: string;
-    source: 'indexeddb' | 'cloud' | 'filename' | 'mixed';
-    status?: string;
-    image?: string;
-  }
-
-  // Define default kanban board statuses
-  const defaultStatuses = [
-    'Предстоящие', // Upcoming
-    'В процессе',  // In Progress
-    'Done'  // Completed
-  ];
-
-  // Define status display names for better UI
-  const statusDisplayNames: Record<string, string> = {
-    'Предстоящие': 'Предстоящие',
-    'В процессе': 'В процессе',
-    'Done': 'Done'
-  };
-
-  let cards: CardDisplay[] = [];
+  let cards: BoardCard[] = [];
   let loading = true;
-  let dbReady = false;
   let offlineMode = false;
   let loadSource: 'indexeddb' | 'cloud' | 'mixed' = 'cloud';
   let loadTime = 0;
-  let groupedCards: Record<string, CardDisplay[]> = {};
+  let error: string | null = null;
+  let columns: BoardColumn[] = [];
+  $: columns = deriveBoardColumns(cards);
 
-  // Function to group cards by status
-  function groupCardsByStatus(cards: CardDisplay[]): Record<string, CardDisplay[]> {
-    const grouped: Record<string, CardDisplay[]> = {};
-
-    // Initialize with default statuses
-    defaultStatuses.forEach(status => {
-      grouped[status] = [];
-    });
-
-    // Group cards by their status
-    cards.forEach(card => {
-      const status = card.status || 'Без статуса'; // Default for cards without status
-      if (!grouped[status]) {
-        grouped[status] = [];
-      }
-      grouped[status].push(card);
-    });
-
-    return grouped;
-  }
-
-  // Get all unique statuses from cards
-  function getAllStatuses(cards: CardDisplay[]): string[] {
-    const statuses = new Set<string>();
-    cards.forEach(card => {
-      statuses.add(card.status || 'Без статуса');
-    });
-    return Array.from(statuses);
-  }
-
-  onMount(async () => {
-    const startTime = performance.now();
-
-    // Initialize the database
-    await initDB();
-    dbReady = true;
-
-    // Try to load cards from IndexedDB first for instant display
-    const localCards = await loadLocalCards();
-    let localCardMap: Map<string, Card> = new Map();
-
-    if (localCards.length > 0) {
-      // Create a map for easy lookup
-      localCards.forEach(card => {
-        localCardMap.set(card.meta.id, card);
-      });
-
-      cards = localCards.map(card => ({
-        id: card.meta.id,
-        title: card.title,
-        modified: new Date(card.meta.modified).toISOString(),
-        source: 'indexeddb',
-        status: card.status,
-        image: card.image
-      }));
-
-      loadSource = 'indexeddb';
-      loadTime = performance.now() - startTime;
-      loading = false;
-
-      // Record performance metrics
-      performanceMonitor.recordCacheHit('main_page', true);
-
-      // Group cards by status
-      groupedCards = groupCardsByStatus(cards);
-    }
-
-    // Try to sync files from cloud for updated data
-    try {
-      await syncFilesFromCloud();
-
-      // If we loaded from IndexedDB, check if cloud has newer data
-      if (loadSource === 'indexeddb') {
-        // Compare timestamps between local and cloud data
-        let hasNewerCloudData = false;
-        const updatedCards: CardDisplay[] = [];
-        const cloudFileMap = new Map<string, CloudFile>();
-
-        // Create a map of cloud files for easy lookup
-        $cloudFiles
-          .filter((file: CloudFile) => file.name.endsWith('.md'))
-          .forEach((file: CloudFile) => {
-            const id = file.name.replace('.md', '');
-            cloudFileMap.set(id, file);
-          });
-
-        // Process all cloud files to determine what needs updating
-        for (const [id, file] of cloudFileMap) {
-          const cloudModified = new Date(file.modified).getTime();
-          const localCard = localCardMap.get(id);
-
-          if (localCard) {
-            // Compare modification times
-            const localModified = localCard.meta.modified;
-
-            // If cloud version is newer, mark it
-            if (cloudModified > localModified) {
-              hasNewerCloudData = true;
-              updatedCards.push({
-                id: id,
-                title: localCard.title, // Will be updated with actual title from cloud if we fetch it
-                modified: file.modified,
-                source: 'mixed', // Mixed because we're combining local and cloud data
-                status: localCard.status,
-                image: localCard.image // Will be updated with actual image from cloud if we fetch it
-              });
-            } else {
-              // Local version is newer or same, keep it
-              updatedCards.push({
-                id: id,
-                title: localCard.title,
-                modified: new Date(localModified).toISOString(),
-                source: 'indexeddb',
-                status: localCard.status,
-                image: localCard.image
-              });
-            }
-          } else {
-            // New card only in cloud
-            hasNewerCloudData = true;
-            updatedCards.push({
-              id: id,
-              title: id, // Will be updated with actual title from cloud if we fetch it
-              modified: file.modified,
-              source: 'cloud',
-              status: undefined,
-              image: undefined // Will be updated with actual image from cloud if we fetch it
-            });
-          }
-        }
-
-        // Also check for local cards that don't exist in cloud (deleted in cloud)
-        for (const [id, localCard] of localCardMap) {
-          if (!cloudFileMap.has(id)) {
-            // Card exists locally but not in cloud, keep local version
-            // Only add if not already in updatedCards
-            if (!updatedCards.some(card => card.id === id)) {
-              updatedCards.push({
-                id: id,
-                title: localCard.title,
-                modified: new Date(localCard.meta.modified).toISOString(),
-                source: 'indexeddb',
-                status: localCard.status,
-                image: localCard.image
-              });
-            }
-          }
-        }
-
-        // For cards with newer cloud data, fetch actual titles from cloud
-        if (hasNewerCloudData) {
-          for (const card of updatedCards) {
-            const file = cloudFileMap.get(card.id);
-            if (file && card.source === 'mixed') {
-              try {
-                // Load the actual card from cloud to get the real title
-                const cloudCard = await loadCardFromCloud(file);
-                if (cloudCard) {
-                  card.title = cloudCard.title;
-                  // @ts-ignore - image property exists on Card type
-                  card.image = cloudCard.image;
-                }
-              } catch (error) {
-                console.warn(`Could not load card ${card.id} from cloud:`, error);
-                // Keep the existing title if we can't load from cloud
-              }
-            } else if (file && card.source === 'cloud') {
-              try {
-                // Load the actual card from cloud to get the real title
-                const cloudCard = await loadCardFromCloud(file);
-                if (cloudCard) {
-                  card.title = cloudCard.title;
-                  // @ts-ignore - image property exists on Card type
-                  card.image = cloudCard.image;
-                }
-              } catch (error) {
-                console.warn(`Could not load card ${card.id} from cloud:`, error);
-                // Keep the filename as title if we can't load from cloud
-              }
-            }
-          }
-        }
-
-        // Update cards array with merged data
-        cards = updatedCards;
-        loadSource = 'mixed'; // Always set to mixed when we've checked both sources
-
-        // Group cards by status
-        groupedCards = groupCardsByStatus(cards);
-      }
-    } catch (error) {
-      console.warn('Could not sync with cloud:', error);
-      offlineMode = true;
-
-      // Even in offline mode, we still have mixed loading (tried both sources)
-      if (loadSource === 'indexeddb') {
-        loadSource = 'mixed';
-      }
-    }
-
-    // If we didn't get cards from IndexedDB, derive them from cloud files
-    if (cards.length === 0) {
-      // Derive cards from cloud files
-      cards = $cloudFiles
-        .filter((file: CloudFile) => file.name.endsWith('.md'))
-        .map((file: CloudFile) => {
-          // Extract ID from filename (remove .md extension)
-          const id = file.name.replace('.md', '');
-          // Use the filename as title initially
-          // In a more complete implementation, we'd parse the file to get the actual title
-          return {
-            id: id,
-            title: id,
-            modified: file.modified,
-            source: 'cloud',
-            status: undefined,
-            image: undefined
-          };
-        });
-
-      loadSource = cards.length > 0 ? 'cloud' : 'indexeddb';
-      loadTime = performance.now() - startTime;
-      loading = false;
-
-      // Record performance metrics
-      performanceMonitor.recordCacheHit('main_page', false);
-
-      // Group cards by status
-      groupedCards = groupCardsByStatus(cards);
-    } else if (loadSource !== 'mixed') {
-      // We had cards from IndexedDB but didn't update from cloud
-      loadSource = 'mixed';
-      loadTime = performance.now() - startTime;
-      loading = false;
-    } else {
-      // We already set loadSource to 'mixed' in the cloud sync section
-      loadTime = performance.now() - startTime;
-      loading = false;
-
-      // Group cards by status
-      groupedCards = groupCardsByStatus(cards);
-    }
-
-    // Validate cache periodically
-    setTimeout(async () => {
-      await cacheManager.validateCache();
-    }, 5000); // Validate after 5 seconds
+  onMount(() => {
+    const controller = new AbortController();
+    void app.loadBoard(state => {
+      cards = state.cards; loading = state.loading; offlineMode = state.offline;
+      loadSource = state.source; loadTime = state.elapsed;
+      error = state.error;
+    }, controller.signal);
+    return () => controller.abort();
   });
 </script>
 
 <div class="container px-4">
+  {#if error}<p role="alert">Не удалось загрузить доску: {error}</p>{/if}
   <div class="header">
     <div class="status-bar">
       {#if loading}
         <span class="tag">Loading...</span>
+      {:else if error}
+        <span class="tag is-warning">{cards.length ? 'Показаны сохранённые заметки' : 'Список заметок недоступен'}</span>
       {:else}
         <span class="tag is-success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
       {/if}
@@ -312,24 +51,29 @@
   {:else}
     <div class="kanban-board columns is-mobile">
       {#if cards.length > 0}
-        {#each Object.entries(groupedCards) as [status, statusCards]}
+        {#each columns as column}
           <div class="kanban-column column">
             <h2 class="column-title">
-              {statusDisplayNames[status] || status}
-              <span class="card-count">({statusCards.length})</span>
+              {column.status}
+              <span class="card-count">({column.cards.length})</span>
             </h2>
 
-            {#each statusCards as card}
-              <a href={`/card/${card.id}`} class="card" data-source={card.source}>
+            {#each column.cards as card}
+              <a href={`/card/${encodeURIComponent(card.filename)}${card.filename === 'new' ? '?mode=edit' : ''}`} class="card" data-source={card.source}>
                 {#if card.image}
                   <div class="card-image">
-                    <img src={card.image} alt="Card image" />
+                    <img src={card.image} alt={card.title} />
                   </div>
                 {/if}
                 <div class="card-content">
                   <h3>{card.title}</h3>
+                  {#if card.readOnly}<span class="tag">Только чтение</span>{/if}
                   <p class="modified-date">
-                    Modified: {new Date(card.modified).toLocaleDateString()}
+                    {#if card.modified === undefined}
+                      Дата изменения неизвестна
+                    {:else}
+                      Modified: {new Date(card.modified).toLocaleDateString()}
+                    {/if}
                   </p>
                   <span class="source-indicator" title="Data source: {card.source}">
                     <span class="icon">
@@ -349,11 +93,12 @@
         {/each}
       {:else if $isAuthenticated}
         <div class="no-cards">
-          <p>No cards available in your Yandex Disk folder.</p>
+          <p>{error ? 'Не удалось получить список заметок.' : 'No cards available in your cloud storage.'}</p>
+          <a href="/card/new">+ New Card</a>
         </div>
       {:else}
         <div class="no-cards">
-          <p>Cloud integration not configured. Please set VITE_YANDEX_DISK_TOKEN in your .env file.</p>
+          <p><a href="/login">Войдите</a>, чтобы загрузить заметки из облака.</p>
         </div>
       {/if}
     </div>

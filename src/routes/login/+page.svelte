@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import LoginForm from '$lib/components/LoginForm.svelte';
-  import { checkAuthStatus } from '$lib/stores/cloudStore';
+  import { checkIsSessionAuthenticated } from '$lib/stores/cloudStore';
 
   let error = '';
   let loading = false;
@@ -46,7 +46,7 @@
       if (response.ok) {
         // Redirect to home page on successful login
         goto('/');
-        await checkAuthStatus();
+        await checkIsSessionAuthenticated();
       } else {
         // Display error message
         error = data.message || 'Login failed. Please try again.';

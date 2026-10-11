@@ -1,41 +1,7 @@
 <script lang="ts">
-  import { cardStore, saveCard, createNewCard, cardSaving, cardSaveError, isOffline, processOfflineQueue } from '../stores/cardStore';
+  import { cardStore } from '../stores/cardStore';
   import ListManager from './ListManager.svelte';
-  import { page } from '$app/stores';
-  import { onMount } from 'svelte';
-  import { isAuthenticated } from '../stores/cloudStore';
-  import type { Card } from '../utils/markdownSerializer';
-
-  let slug = $page.params.slug;
-  let saving = false;
-  let saveError: string | null = null;
-  let offlineMode = false;
-
-  // Subscribe to store values
-  cardSaving.subscribe(value => {
-    saving = value;
-  });
-
-  cardSaveError.subscribe(value => {
-    saveError = value;
-  });
-
-  isOffline.subscribe(value => {
-    offlineMode = value;
-  });
-
-  onMount(() => {
-    // If we're creating a new card and there's no card in the store, create a new one
-    if (slug === 'new' && !$cardStore) {
-      const newCard = createNewCard('New Card');
-      cardStore.set(newCard);
-    }
-
-    // Process any pending offline operations when online
-    if (!offlineMode && isAuthenticated) {
-      processOfflineQueue();
-    }
-  });
+  import CardSaveToolbar from './CardSaveToolbar.svelte';
 
   function addSection() {
     cardStore.update(store => {
@@ -81,56 +47,10 @@
     });
   }
 
-  async function save() {
-    saving = true;
-    saveError = null;
-
-    try {
-      // For new cards, use the card ID as the filename, otherwise use the slug
-      const filename = slug === 'new' && $cardStore ? $cardStore.meta.id : slug;
-      if (filename && $cardStore) {
-        await saveCard(filename, $cardStore);
-      }
-    } catch (error) {
-      saveError = error instanceof Error ? error.message : 'Failed to save card';
-      console.error('Error saving card:', error);
-    } finally {
-      saving = false;
-    }
-  }
-
-  function renderSectionContent(section: any) {
-    let markdown = '';
-    section.items.forEach((item: any) => {
-      let prefix = '';
-      let text = item.text;
-
-      // Add strikethrough for checked items in all list types
-      if (item.checked) {
-        text = `~~${text}~~`;
-      }
-
-      if (section.type === 'unordered') prefix = '- ';
-      if (section.type === 'ordered') prefix = '1. ';
-      if (section.type === 'checklist') prefix = item.checked ? '- [x] ' : '- [ ] ';
-
-      markdown += `${prefix}${text}\n`;
-    });
-    return markdown;
-  }
 </script>
 
 <div class="combined-card-view">
-  <div class="toolbar">
-    <button class="button" on:click={save} disabled={saving}>
-      {saving ? 'Saving...' : 'Save'}
-    </button>
-    {#if saveError}
-      <div class="save-error">
-        Error: {saveError}
-      </div>
-    {/if}
-  </div>
+  <CardSaveToolbar />
 
   {#if $cardStore}
     <div class="combined-card-view">
@@ -139,14 +59,17 @@
           type="text"
           bind:value={$cardStore.title}
           placeholder="Card title"
+          aria-label="Название заметки"
           class="card-title-input input"
         />
         <div class="card-meta">
           <span class="card-id">ID: {$cardStore.meta.id}</span>
           <input
             type="text"
-            bind:value={$cardStore.status}
+            value={$cardStore.status ?? ''}
+            on:input={(event) => cardStore.update(card => card ? { ...card, status: event.currentTarget.value || undefined } : card)}
             placeholder="Status"
+            aria-label="Статус"
             class="input"
           />
         </div>
@@ -159,7 +82,8 @@
             <input
               type="text"
               id="image"
-              bind:value={$cardStore.image}
+              value={$cardStore.image ?? ''}
+              on:input={(event) => cardStore.update(card => card ? { ...card, image: event.currentTarget.value || undefined } : card)}
               placeholder="Image URL"
               class="input"
             />
@@ -167,7 +91,7 @@
 
           {#if $cardStore.image}
             <div class="card-image-preview">
-              <img src={$cardStore.image} alt="Card image" class="card-image" />
+              <img src={$cardStore.image} alt={$cardStore.title} class="card-image" />
             </div>
           {/if}
         </div>
@@ -176,6 +100,7 @@
           <textarea
             bind:value={$cardStore.description}
             placeholder="Card description"
+            aria-label="Описание"
             class="description-input textarea"
           ></textarea>
         </div>
@@ -189,6 +114,7 @@
                     type="text"
                     bind:value={section.heading}
                     placeholder="Section heading"
+                    aria-label="Название секции"
                     class="section-heading-input input"
                   />
                   <button on:click={() => removeSection(index)} class="button is-danger">Remove</button>
@@ -222,6 +148,7 @@
               type="text"
               value={($cardStore.tags || []).join(' ')}
               placeholder="Tags (space separated)"
+              aria-label="Теги"
               class="input"
               on:input={(e: Event) => {
                 const target = e.target as HTMLInputElement;
@@ -241,15 +168,6 @@
 </div>
 
 <style>
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-
   .combined-card-header {
     border-bottom: 1px solid #e0e0e0;
     padding-bottom: 1rem;
@@ -285,17 +203,6 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-  }
-
-  .card-description h2,
-  .card-sections h2,
-  .card-section h3 {
-    font-size: 1.3rem;
-    font-weight: 600;
-    margin: 0 0 0.75rem 0;
-    color: #444;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 0.25rem;
   }
 
   .description-input {
@@ -357,24 +264,6 @@
     text-align: center;
     padding: 2rem;
     color: #666;
-  }
-
-  .save-error {
-    color: #dc3545;
-    background-color: #f8d7da;
-    border: 1px solid #f5c6cb;
-    border-radius: 4px;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .offline-warning {
-    color: #856404;
-    background-color: #fff3cd;
-    border: 1px solid #ffeaa7;
-    border-radius: 4px;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
   }
 
   .card-image-preview {

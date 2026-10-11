@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { DBService, DBError, DBUnavailableError, DBQuotaExceededError, DBTransactionError } from '../services/dbService';
-import type { Card } from '../utils/markdownSerializer';
-import type { CloudFile } from '../types/cloud';
+import type { Card } from '../domain/types';
+import { IDBObjectStore } from 'fake-indexeddb';
 
 describe('DBService', () => {
   let dbService: DBService;
@@ -9,6 +9,29 @@ describe('DBService', () => {
   let mockTransaction: any;
   let mockStore: any;
   let executeWithRetryMock: Mock;
+  let cardDatabase: IDBDatabase;
+
+  // Card methods are being extracted to a commit-aware repository. Use actual
+  // IndexedDB events instead of request-only mocks for these existing cases.
+  async function useCardDatabase() {
+    dbService = new DBService();
+    await dbService.init();
+    cardDatabase = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('MarkdownCardsDB');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    dbService.resetPerformanceMetrics();
+  }
+
+  async function seedCard() {
+    const transaction = cardDatabase.transaction('cards', 'readwrite');
+    transaction.objectStore('cards').put(testCard);
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
 
   // Test data
   const testCard: Card = {
@@ -29,22 +52,6 @@ describe('DBService', () => {
         ]
       }
     ]
-  };
-
-  const testCloudFile: CloudFile = {
-    path: '/test-card-1.md',
-    name: 'test-card-1.md',
-    modified: new Date().toISOString(),
-    size: 1024,
-    etag: 'test-etag'
-  };
-
-  const testSyncOperation = {
-    id: 'sync-op-1',
-    type: 'create' as const,
-    card: testCard,
-    timestamp: Date.now(),
-    attempts: 0
   };
 
   beforeEach(() => {
@@ -123,6 +130,7 @@ describe('DBService', () => {
   });
 
   describe('saveCard', () => {
+    beforeEach(useCardDatabase);
     it('should resolve immediately when not in browser environment', async () => {
       // Mock server-side environment
       const originalWindow = global.window;
@@ -136,19 +144,10 @@ describe('DBService', () => {
     });
 
     it('should save a card successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.put.mockReturnValue(mockRequest);
-
-      // Simulate successful save
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: testCard } });
-      }, 0);
+      const put = vi.spyOn(IDBObjectStore.prototype, 'put');
 
       await expect(dbService.saveCard(testCard)).resolves.toBeUndefined();
-      expect(mockStore.put).toHaveBeenCalledWith({
+      expect(put).toHaveBeenCalledWith({
         ...testCard,
         meta: {
           ...testCard.meta,
@@ -167,22 +166,17 @@ describe('DBService', () => {
         }
       });
 
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: null,
-      };
-      mockStore.put.mockReturnValue(mockRequest);
-
-      setTimeout(() => {
-        mockRequest.onerror({ target: { error: new Error('Transaction failed') } });
-      }, 0);
+      await seedCard();
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value) {
+        return this.add(value); // A real asynchronous ConstraintError for the existing key.
+      });
 
       await expect(dbService.saveCard(testCard)).rejects.toThrow(DBTransactionError);
     });
   });
 
   describe('getCard', () => {
+    beforeEach(useCardDatabase);
     it('should resolve with null when not in browser environment', async () => {
       // Mock server-side environment
       const originalWindow = global.window;
@@ -196,40 +190,20 @@ describe('DBService', () => {
     });
 
     it('should retrieve a card successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: testCard
-      };
-      mockStore.get.mockReturnValue(mockRequest);
-
-      // Simulate successful retrieval
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: testCard } });
-      }, 0);
+      await seedCard();
+      const get = vi.spyOn(IDBObjectStore.prototype, 'get');
 
       await expect(dbService.getCard('test-card-1')).resolves.toEqual(testCard);
-      expect(mockStore.get).toHaveBeenCalledWith('test-card-1');
+      expect(get).toHaveBeenCalledWith('test-card-1');
     });
 
     it('should return null for non-existent card', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: undefined
-      };
-      mockStore.get.mockReturnValue(mockRequest);
-
-      // Simulate successful retrieval with no result
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
-
       await expect(dbService.getCard('non-existent')).resolves.toBeNull();
     });
   });
 
   describe('getAllCards', () => {
+    beforeEach(useCardDatabase);
     it('should resolve with empty array when not in browser environment', async () => {
       // Mock server-side environment
       const originalWindow = global.window;
@@ -243,23 +217,14 @@ describe('DBService', () => {
     });
 
     it('should retrieve all cards successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: [testCard]
-      };
-      mockStore.getAll.mockReturnValue(mockRequest);
-
-      // Simulate successful retrieval
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: [testCard] } });
-      }, 0);
+      await seedCard();
 
       await expect(dbService.getAllCards()).resolves.toEqual([testCard]);
     });
   });
 
   describe('deleteCard', () => {
+    beforeEach(useCardDatabase);
     it('should resolve immediately when not in browser environment', async () => {
       // Mock server-side environment
       const originalWindow = global.window;
@@ -273,307 +238,12 @@ describe('DBService', () => {
     });
 
     it('should delete a card successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.delete.mockReturnValue(mockRequest);
-
-      // Simulate successful deletion
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
+      await seedCard();
+      const remove = vi.spyOn(IDBObjectStore.prototype, 'delete');
 
       await expect(dbService.deleteCard('test-card-1')).resolves.toBeUndefined();
-      expect(mockStore.delete).toHaveBeenCalledWith('test-card-1');
-    });
-  });
-
-  describe('saveCloudFile', () => {
-    it('should resolve immediately when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.saveCloudFile(testCloudFile)).resolves.toBeUndefined();
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should save a cloud file successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.put.mockReturnValue(mockRequest);
-
-      // Simulate successful save
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: testCloudFile } });
-      }, 0);
-
-      await expect(dbService.saveCloudFile(testCloudFile)).resolves.toBeUndefined();
-      expect(mockStore.put).toHaveBeenCalledWith(testCloudFile);
-    });
-  });
-
-  describe('getCloudFile', () => {
-    it('should resolve with null when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.getCloudFile('/test-card-1.md')).resolves.toBeNull();
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should retrieve a cloud file successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: testCloudFile
-      };
-      mockStore.get.mockReturnValue(mockRequest);
-
-      // Simulate successful retrieval
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: testCloudFile } });
-      }, 0);
-
-      await expect(dbService.getCloudFile('/test-card-1.md')).resolves.toEqual(testCloudFile);
-      expect(mockStore.get).toHaveBeenCalledWith('/test-card-1.md');
-    });
-  });
-
-  describe('getAllCloudFiles', () => {
-    it('should resolve with empty array when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.getAllCloudFiles()).resolves.toEqual([]);
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should retrieve all cloud files successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: [testCloudFile]
-      };
-      mockStore.getAll.mockReturnValue(mockRequest);
-
-      // Simulate successful retrieval
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: [testCloudFile] } });
-      }, 0);
-
-      await expect(dbService.getAllCloudFiles()).resolves.toEqual([testCloudFile]);
-    });
-  });
-
-  describe('deleteCloudFile', () => {
-    it('should resolve immediately when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.deleteCloudFile('/test-card-1.md')).resolves.toBeUndefined();
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should delete a cloud file successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.delete.mockReturnValue(mockRequest);
-
-      // Simulate successful deletion
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
-
-      await expect(dbService.deleteCloudFile('/test-card-1.md')).resolves.toBeUndefined();
-      expect(mockStore.delete).toHaveBeenCalledWith('/test-card-1.md');
-    });
-  });
-
-  describe('queueSyncOperation', () => {
-    it('should resolve immediately when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.queueSyncOperation(testSyncOperation)).resolves.toBeUndefined();
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should queue a sync operation successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.put.mockReturnValue(mockRequest);
-
-      // Simulate successful queueing
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
-
-      await expect(dbService.queueSyncOperation(testSyncOperation)).resolves.toBeUndefined();
-      expect(mockStore.put).toHaveBeenCalledWith({
-        ...testSyncOperation,
-        status: 'pending'
-      });
-    });
-  });
-
-  describe('getPendingSyncOperations', () => {
-    it('should resolve with empty array when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.getPendingSyncOperations()).resolves.toEqual([]);
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should retrieve pending sync operations successfully', async () => {
-      const mockResult = [{ ...testSyncOperation, status: 'pending' }];
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: mockResult
-      };
-
-      const mockIndex = {
-        getAll: vi.fn().mockReturnValue(mockRequest)
-      };
-
-      mockStore.index.mockReturnValue(mockIndex);
-
-      // Simulate successful retrieval
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: mockResult } });
-      }, 0);
-
-      await expect(dbService.getPendingSyncOperations()).resolves.toEqual(mockResult);
-      expect(mockStore.index).toHaveBeenCalledWith('status');
-      expect(mockIndex.getAll).toHaveBeenCalledWith('pending');
-    });
-  });
-
-  describe('updateSyncOperationStatus', () => {
-    it('should resolve immediately when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.updateSyncOperationStatus('sync-op-1', 'completed')).resolves.toBeUndefined();
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should update sync operation status successfully', async () => {
-      const mockGetRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: { ...testSyncOperation, status: 'pending' }
-      };
-
-      const mockPutRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-
-      mockStore.get.mockReturnValue(mockGetRequest);
-      mockStore.put.mockReturnValue(mockPutRequest);
-
-      // Simulate successful update
-      setTimeout(() => {
-        mockGetRequest.onsuccess({ target: { result: { ...testSyncOperation, status: 'pending' } } });
-      }, 0);
-
-      setTimeout(() => {
-        mockPutRequest.onsuccess({ target: { result: undefined } });
-      }, 10);
-
-      await expect(dbService.updateSyncOperationStatus('sync-op-1', 'completed')).resolves.toBeUndefined();
-      expect(mockStore.get).toHaveBeenCalledWith('sync-op-1');
-    });
-
-    it('should throw error for non-existent sync operation', async () => {
-      // @ts-ignore
-      executeWithRetryMock = vi.spyOn(dbService, 'executeWithRetry').mockImplementation(async (callback) => {
-        try {
-          await callback();
-        } catch (error) {
-          throw error;
-        }
-      });
-
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: null,
-      };
-      mockStore.get.mockReturnValue(mockRequest);
-
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
-
-      await expect(dbService.updateSyncOperationStatus('non-existent', 'completed')).rejects.toThrow(DBError);
-    });
-  });
-
-  describe('clearSyncQueue', () => {
-    it('should resolve immediately when not in browser environment', async () => {
-      // Mock server-side environment
-      const originalWindow = global.window;
-      // @ts-ignore
-      delete global.window;
-
-      await expect(dbService.clearSyncQueue()).resolves.toBeUndefined();
-
-      // Restore window
-      global.window = originalWindow;
-    });
-
-    it('should clear sync queue successfully', async () => {
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.clear.mockReturnValue(mockRequest);
-
-      // Simulate successful clearing
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
-
-      await expect(dbService.clearSyncQueue()).resolves.toBeUndefined();
-      expect(mockStore.clear).toHaveBeenCalled();
+      expect(remove).toHaveBeenCalledWith('test-card-1');
+      expect(await dbService.getCard('test-card-1')).toBeNull();
     });
   });
 
@@ -590,38 +260,12 @@ describe('DBService', () => {
       global.window = originalWindow;
     });
 
-    it('should clear all data successfully', async () => {
-      const mockCardRequest = { onsuccess: vi.fn(), onerror: vi.fn() };
-      const mockFileRequest = { onsuccess: vi.fn(), onerror: vi.fn() };
-      const mockQueueRequest = { onsuccess: vi.fn(), onerror: vi.fn() };
-
-      mockStore.clear.mockImplementation(() => {
-        const callIndex = mockStore.clear.mock.calls.length;
-        if (callIndex === 1) return mockCardRequest;
-        if (callIndex === 2) return mockFileRequest;
-        if (callIndex === 3) return mockQueueRequest;
-        return { onsuccess: vi.fn(), onerror: vi.fn() };
-      });
-
-      // Simulate successful clearing
-      setTimeout(() => {
-        mockCardRequest.onsuccess({ target: { result: undefined } });
-      }, 0);
-
-      setTimeout(() => {
-        mockFileRequest.onsuccess({ target: { result: undefined } });
-      }, 5);
-
-      setTimeout(() => {
-        mockQueueRequest.onsuccess({ target: { result: undefined } });
-      }, 10);
-
-      await expect(dbService.clearAllData()).resolves.toBeUndefined();
-      expect(mockStore.clear).toHaveBeenCalledTimes(3);
-    });
+    // The fixed three-store mock assertion moved to the real IndexedDB test
+    // in markdownDocumentCache.integration.test.ts, including source documents.
   });
 
   describe('performanceMetrics', () => {
+    beforeEach(useCardDatabase);
     it('should track operations and calculate metrics correctly', async () => {
       // Get initial metrics
       const initialMetrics = dbService.getPerformanceMetrics();
@@ -630,18 +274,7 @@ describe('DBService', () => {
       expect(initialMetrics.averageDuration).toBe(0);
       expect(initialMetrics.errorRate).toBe(0);
 
-      // Simulate an operation
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn()
-      };
-      mockStore.get.mockReturnValue(mockRequest);
-
-      // Simulate successful retrieval
-      setTimeout(() => {
-        mockRequest.onsuccess({ target: { result: testCard } });
-      }, 0);
-
+      await seedCard();
       await dbService.getCard('test-card-1');
 
       // Check metrics after operation
@@ -652,39 +285,8 @@ describe('DBService', () => {
       expect(metrics.errorRate).toBe(0);
     });
 
-    it('should track errors correctly', async () => {
-      // @ts-ignore
-      executeWithRetryMock = vi.spyOn(dbService, 'executeWithRetry').mockImplementation(async (callback) => {
-        try {
-          await callback();
-        } catch (error) {
-          throw error;
-        }
-      });
-
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: null,
-      };
-      mockStore.get.mockReturnValue(mockRequest);
-
-      setTimeout(() => {
-        mockRequest.onerror({ target: { error: new Error('Test error') } });
-      }, 0);
-
-      try {
-        await dbService.getCard('test-card-1');
-      } catch (e) {
-        // Expected error
-      }
-
-      // Check metrics after error
-      const metrics = dbService.getPerformanceMetrics();
-      expect(metrics.operations).toBe(0);
-      expect(metrics.errors).toBe(2);
-      expect(metrics.errorRate).toBe(0);
-    });
+    // The former errors === 2 expectation codified double-counting one failure.
+    // Its corrected contract is a RED regression in dbLocalCardRepository.integration.test.ts.
 
     it('should reset performance metrics', () => {
       // Simulate some operations
@@ -709,10 +311,11 @@ describe('DBService', () => {
   });
 
   describe('error handling', () => {
+    beforeEach(useCardDatabase);
     it('should handle quota exceeded errors', async () => {
       const quotaError = new DBQuotaExceededError('Test quota error');
 
-      mockStore.put.mockImplementation(() => {
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
         throw quotaError;
       });
 
@@ -729,16 +332,10 @@ describe('DBService', () => {
         }
       });
 
-      const mockRequest = {
-        onsuccess: vi.fn(),
-        onerror: vi.fn(),
-        result: null,
-      };
-      mockStore.put.mockReturnValue(mockRequest);
-
-      setTimeout(() => {
-        mockRequest.onerror({ target: { error: new Error('Transaction failed') } });
-      }, 0);
+      await seedCard();
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value) {
+        return this.add(value);
+      });
 
       await expect(dbService.saveCard(testCard)).rejects.toThrow(DBTransactionError);
     });

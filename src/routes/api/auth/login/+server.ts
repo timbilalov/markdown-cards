@@ -1,30 +1,26 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { validateCredentials } from '$lib/server/auth';
-import { ADMIN_USERNAME } from '$lib/utils/envLoader';
+import { issueSession, type IssuedSession } from '$lib/server/session';
+import { readRequestBody } from '$lib/server/requestBody';
+import { parseLoginRequest } from '$lib/server/loginRequest';
 import logger from '$lib/utils/logger';
-import crypto from 'crypto';
 
-// In-memory store for CSRF tokens (in production, use a database)
-const csrfTokenStore = new Map<string, { token: string; expires: number }>();
+const headers = { 'Cache-Control': 'private, no-store' };
+const bodyErrors = {
+  'unsupported-media-type': { status: 415, message: 'Unsupported request media type.' },
+  'too-large': { status: 413, message: 'Request body is too large.' },
+  invalid: { status: 400, message: 'Invalid login request.' }
+};
 
-// Generate a random CSRF token
-function generateCSRFToken(): string {
-  return crypto.randomBytes(32).toString('hex');
-}
-
-// Set auth cookie
 function setAuthCookie(
   cookies: import('@sveltejs/kit').Cookies,
-  username: string,
-  rememberMe: boolean
+  issued: IssuedSession
 ) {
-  // For "Remember Me", set expiration (30 days)
-  // For session-only, don't set expiration (cookie expires when browser closes)
-  const expires = rememberMe ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined;
+  // Browser persistence never extends the absolute expiry in the signed claims.
+  const expires = issued.session.rememberMe ? new Date(issued.session.expiresAt) : undefined;
 
-  // Set the authentication cookie
-  cookies.set('auth_token', username, {
+  cookies.set('auth_token', issued.token, {
     path: '/',
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -32,37 +28,33 @@ function setAuthCookie(
     expires
   });
 
-  // Set CSRF token cookie
-  const csrfToken = generateCSRFToken();
-  const csrfExpires = expires; // Same expiration as auth token
-
-  cookies.set('csrf_token', csrfToken, {
+  // Retire cookies issued by the old double-submit mechanism.
+  cookies.delete('csrf_token', {
     path: '/',
-    httpOnly: false, // Need to access this from client for forms
+    httpOnly: false,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    expires: csrfExpires
+    sameSite: 'strict'
   });
-
-  // Store CSRF token in memory (in production, use a database)
-  if (expires) {
-    csrfTokenStore.set(username, {
-      token: csrfToken,
-      expires: expires.getTime()
-    });
-  }
 }
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   try {
-    // Parse request body
-    const { username, password, rememberMe } = await request.json();
+    const bodyResult = await readRequestBody(request, 'json');
+    if (bodyResult.status !== 'success') {
+      const { status, message } = bodyErrors[bodyResult.status];
+      return json({ message }, { status, headers });
+    }
+    const input = await parseLoginRequest(bodyResult.response);
+    if (input === null) {
+      return json({ message: 'Invalid login request.' }, { status: 400, headers });
+    }
+    const { username, password, rememberMe = false } = input;
 
     // Validate input
     if (!username || !password) {
       return json(
         { message: 'Username and password are required.' },
-        { status: 400 }
+        { status: 400, headers }
       );
     }
 
@@ -78,12 +70,18 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       // Return generic error message to prevent user enumeration
       return json(
         { message: 'Invalid username or password.' },
-        { status: 401 }
+        { status: 401, headers }
       );
     }
 
-    // Set authentication cookies
-    setAuthCookie(cookies, username, rememberMe || false);
+    let issued: IssuedSession;
+    try {
+      issued = issueSession(username, rememberMe);
+    } catch {
+      logger.error('Authentication is not configured');
+      return json({ message: 'Authentication is not configured.' }, { status: 503, headers });
+    }
+    setAuthCookie(cookies, issued);
 
     logger.info('Successful login', {
       username,
@@ -96,12 +94,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       user: {
         username
       }
-    });
-  } catch (error) {
-    logger.error('Login error', { error });
+    }, { headers });
+  } catch {
+    // Do not serialize errors that could contain credentials or cookie values.
+    logger.error('Login error');
     return json(
       { message: 'An unexpected error occurred during login.' },
-      { status: 500 }
+      { status: 500, headers }
     );
   }
 };

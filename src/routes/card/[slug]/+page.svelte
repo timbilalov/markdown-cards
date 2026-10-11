@@ -2,51 +2,43 @@
   import { onMount } from 'svelte';
   import CombinedCardView from '../../../lib/components/CombinedCardView.svelte';
   import MarkdownPreview from '../../../lib/components/MarkdownPreview.svelte';
-  import { loadCard, cardLoading, cardLoadSource, cardLoadTime, isOffline, cardStore } from '../../../lib/stores/cardStore';
+  import {
+    cardLoading, cardLoadSource, cardLoadTime, isOffline, cardStore,
+    cardDocument, cardSaveMessage,
+    getCardDocumentSource, getCardDocumentMessage
+  } from '../../../lib/stores/cardStore';
+  import { app } from '$lib/stores/appFacade';
+  const { loadCard, openNewCard, resetCard: resetCardDocument, migrateCard: migrateCurrentCardFormat } = app;
   import { pageTitle } from '$lib/stores/titleStore';
   import { page } from '$app/stores';
-  import { performanceMonitor } from '$lib/services/performanceMonitor';
 
-  let slug: string | undefined;
-  let loading = false;
-  let loadSource: 'indexeddb' | 'cloud' | 'memory' | null = null;
-  let loadTime = 0;
-  let offlineMode = false;
+  let mounted = false;
+  let loadedSlug: string | undefined;
   let viewMode: 'combined' | 'markdown' = 'combined';
 
-  // Subscribe to store values
-  cardLoading.subscribe(value => {
-    loading = value;
-  });
-
-  // Update page title when card data changes
-  cardStore.subscribe((card) => {
-    if (card) {
-      pageTitle.set(card.title);
-    } else if (slug === 'new') {
-      pageTitle.set('New Card - MD Cards');
+  $: slug = $page.params.slug;
+  $: isNew = slug === 'new' && $page.url?.searchParams.get('mode') !== 'edit';
+  $: routeKey = `${slug}:${isNew}`;
+  $: if (mounted && slug && routeKey !== loadedSlug) {
+    loadedSlug = routeKey;
+    viewMode = 'combined';
+    if (isNew) {
+      openNewCard();
     } else {
-      pageTitle.set('Card - MD Cards');
+      void loadCard(slug);
     }
-  });
+  }
+  $: pageTitle.set($cardStore?.title ?? (isNew ? 'New Card - MD Cards' : 'Card - MD Cards'));
+  $: document = $cardDocument;
+  $: isBlocked = document !== null && (document.status !== 'loaded'
+    || document.readOnlyReason !== undefined || document.result.status !== 'success');
+  $: isLegacy = document?.status === 'loaded'
+    && document.readOnlyReason === undefined
+    && document.result.status === 'unsupported' && document.result.reason === 'missing-version';
 
-  cardLoadSource.subscribe(value => {
-    loadSource = value;
-  });
-
-  cardLoadTime.subscribe(value => {
-    loadTime = value;
-  });
-
-  isOffline.subscribe(value => {
-    offlineMode = value;
-  });
-
-  onMount(async () => {
-    slug = $page.params.slug;
-    if (slug && slug !== 'new') {
-      await loadCard(slug);
-    }
+  onMount(() => {
+    mounted = true;
+    return resetCardDocument;
   });
 
   function toggleViewMode() {
@@ -56,7 +48,7 @@
 
 
 <div class="container px-4">
-  {#if loading}
+  {#if !mounted || $cardLoading}
     <div class="loading">
       <p>Loading card...</p>
       <div class="icon">
@@ -65,12 +57,12 @@
     </div>
   {:else}
     <div class="status-bar">
-      {#if loadSource}
-        <span class="tag is-success">Loaded from {loadSource} in {loadTime.toFixed(2)}ms</span>
+      {#if $cardLoadSource}
+        <span class="tag is-success">Loaded from {$cardLoadSource} in {$cardLoadTime.toFixed(2)}ms</span>
       {/if}
 
-      {#if offlineMode}
-        <span class="tag is-warning">Offline Mode - Changes will be synced when online</span>
+      {#if $isOffline}
+        <span class="tag is-warning">Нет подключения к сети. Save сохранит изменения локально; синхронизация продолжится после подключения.</span>
       {/if}
 
       <button class="button" on:click={toggleViewMode}>
@@ -78,14 +70,45 @@
       </button>
     </div>
 
-    {#if viewMode === 'combined'}
+    {#if isBlocked && document}
+      <div class="toolbar">
+        {#if isLegacy}
+          <button class="button" on:click={migrateCurrentCardFormat}>Обновить формат</button>
+        {/if}
+        <button class="button" disabled>Save</button>
+      </div>
+      <p role="alert">{getCardDocumentMessage(document)}</p>
+      {#if document.status === 'loaded'}
+        <textarea
+          class="textarea original-source"
+          aria-label="Исходный Markdown"
+          readonly
+          rows="18"
+          value={getCardDocumentSource(document)}
+        ></textarea>
+      {/if}
+    {:else if viewMode === 'combined'}
       <CombinedCardView />
     {:else}
-      <MarkdownPreview />
+      <MarkdownPreview formatVersion={document ? 1 : null} />
+    {/if}
+    {#if $cardSaveMessage}
+      <p role="status">{$cardSaveMessage}</p>
     {/if}
   {/if}
 </div>
 <style>
+  .toolbar {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .original-source {
+    width: 100%;
+    font-family: monospace;
+  }
+
   .status-bar {
     display: flex;
     justify-content: space-between;

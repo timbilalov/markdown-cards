@@ -1,18 +1,21 @@
 <script lang="ts">
   import { cardStore } from '../stores/cardStore';
-  import { marked } from 'marked';
-  import { serializeCard, type Card } from '../utils/markdownSerializer';
+  import { renderMarkdownPreview } from '../utils/markdownPreview';
+  import { serializeMarkdownDocument } from '../domain/markdown';
 
-  // Configure marked to handle newlines better
-  marked.setOptions({
-    breaks: true, // Convert single newlines to <br>
-    gfm: true // Use GitHub Flavored Markdown
-  });
+  export let formatVersion: 1 | null = null;
 
-  $: markdown = $cardStore ? serializeCard($cardStore) : '';
-  $: htmlContent = marked(markdown);
+  $: serialized = $cardStore && formatVersion === 1 ? serializeMarkdownDocument($cardStore) : null;
+  $: markdown = serialized?.status === 'success' ? serialized.markdown : '';
+  $: htmlContent = renderMarkdownPreview(markdown);
 </script>
 
 <div class="content my-4">
-  {@html htmlContent}
+  {#if $cardStore && formatVersion !== 1}
+    <p role="alert">Формат заметки не определён. Откройте её заново.</p>
+  {:else if serialized?.status === 'invalid'}
+    <p role="alert">Изменения нельзя представить в текущем формате заметки. Проверьте содержимое в редакторе.</p>
+  {:else}
+    {@html htmlContent}
+  {/if}
 </div>

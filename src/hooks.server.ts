@@ -1,6 +1,7 @@
 import { sequence } from '@sveltejs/kit/hooks';
-import type { Handle } from '@sveltejs/kit';
-import { validateCredentials } from '$lib/server/auth';
+import { json } from '@sveltejs/kit';
+import type { Handle, RequestEvent } from '@sveltejs/kit';
+import { verifySession } from '$lib/server/session';
 import logger from '$lib/utils/logger';
 
 // In-memory store for rate limiting
@@ -9,10 +10,12 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 // Rate limiting configuration
 const RATE_LIMIT = 100; // requests per hour
 const TIME_WINDOW = 60 * 60 * 1000; // 1 hour in milliseconds
+let nextCleanup = 0;
 
 // Check rate limit for an IP
 function checkRateLimit(ip: string): { allowed: boolean; resetTime?: number } {
   const now = Date.now();
+  if (now >= nextCleanup) { cleanupRateLimitStore(); nextCleanup = now + TIME_WINDOW; }
   let record = rateLimitStore.get(ip);
 
   // Reset count if time window has passed
@@ -46,117 +49,79 @@ function cleanupRateLimitStore() {
   }
 }
 
-// Run cleanup every hour
-setInterval(cleanupRateLimitStore, 60 * 60 * 1000);
-
 // Authentication middleware
+const publicPaths = new Set([
+  '/favicon.ico', '/api/auth/login', '/api/auth/logout',
+  '/api/auth/user', '/api/auth/status', '/login'
+]);
+
 const authMiddleware: Handle = async ({ event, resolve }) => {
-  // Skip authentication for static files, API auth routes, and login page
-  if (
-    event.url.pathname.startsWith('/favicon.ico') ||
-    event.url.pathname.startsWith('/api/auth/login') ||
-    event.url.pathname.startsWith('/api/auth/logout') ||
-    event.url.pathname.startsWith('/api/auth/user') ||
-    event.url.pathname.startsWith('/api/auth/status') ||
-    event.url.pathname === '/login'
-  ) {
-    return resolve(event);
-  }
+  const session = verifySession(event.cookies.get('auth_token'));
+  const isPublic = publicPaths.has(event.url.pathname);
 
   // Check rate limit
   const clientIP = event.getClientAddress();
-  const rateLimitResult = checkRateLimit(clientIP);
+  // Protect login and unauthenticated probing. Normal authenticated cloud
+  // reads/writes must not exhaust the login budget while refreshing a folder.
+  const rateLimitResult = event.url.pathname === '/api/auth/login' || (!isPublic && !session)
+    ? checkRateLimit(clientIP) : { allowed: true };
   if (!rateLimitResult.allowed) {
     logger.warn('Rate limit exceeded', {
       ip: clientIP,
       count: RATE_LIMIT,
       limit: RATE_LIMIT
     });
-    return new Response('Too Many Requests', {
-      status: 429,
-      headers: {
+    const options = { status: 429, headers: {
         'Retry-After': Math.ceil(((rateLimitResult.resetTime || 0) - Date.now()) / 1000).toString()
-      }
-    });
+      } };
+    return event.url.pathname.startsWith('/api/')
+      ? json({ message: 'Too Many Requests', error: 'RATE_LIMITED', outcome: 'not-written' }, options)
+      : new Response('Too Many Requests', options);
   }
 
-  // Check for auth token cookie
-  const authToken = event.cookies.get('auth_token');
+  // Auth handlers verify identity themselves; logout also clears stale cookies.
+  if (isPublic) return resolve(event);
 
-  if (!authToken) {
-    // Redirect to login page
+  // Authenticate before invoking handlers or reading a state-changing body.
+  if (!session) {
+    if (event.url.pathname.startsWith('/api/')) {
+      return json({ error: 'Not authenticated' }, {
+        status: 401,
+        headers: { 'Cache-Control': 'private, no-store' }
+      });
+    }
     return new Response(null, {
       status: 302,
       headers: {
-        'Location': '/login'
+        'Location': '/login',
+        'Cache-Control': 'private, no-store'
       }
     });
-  }
-
-  // For form submissions, check CSRF token
-  // Skip CSRF check for API endpoints that are already protected by authentication
-  if ((event.request.method === 'POST' || event.request.method === 'PUT' || event.request.method === 'DELETE') &&
-      !event.url.pathname.startsWith('/api/cloud/upload')) {
-    const csrfToken = event.cookies.get('csrf_token');
-    const requestCSRF = event.request.headers.get('X-CSRF-Token') ||
-                       (event.request.headers.get('content-type')?.includes('form') ?
-                        new URLSearchParams(await event.request.text()).get('_csrf') : null);
-
-    if (!csrfToken || csrfToken !== requestCSRF) {
-      logger.warn('CSRF token mismatch', {
-        ip: clientIP,
-        userAgent: event.request.headers.get('user-agent')
-      });
-      return new Response('Forbidden', { status: 403 });
-    }
   }
 
   // Log successful authentication
   logger.info('Authenticated request', {
-    username: authToken,
+    username: session.username,
     ip: clientIP,
     path: event.url.pathname
   });
 
-  // Get current cookie options to determine if it's a persistent cookie
-  // In a real implementation, you would check the actual cookie expiration
-  // For now, we'll extend the session with the same logic as login
-  // If it's a persistent cookie (Remember Me), extend it for 30 days
-  // If it's a session cookie, don't set expiration (expires when browser closes)
+  return resolve(event);
+};
 
-  // For simplicity in this implementation, we'll extend persistent cookies
-  // and leave session cookies as they are
-  const cookieHeader = event.request.headers.get('cookie');
-  if (cookieHeader && cookieHeader.includes('auth_token=')) {
-    // Check if the cookie appears to be persistent by looking for an expiration
-    // This is a simplified check - in a real implementation, you would parse the cookie properly
-    const isPersistent = cookieHeader.includes('Expires=') || cookieHeader.includes('expires=');
+const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-    if (isPersistent) {
-      // Extend the persistent cookie for another 30 days
-      const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
-      event.cookies.set('auth_token', authToken, {
-        path: '/',
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        expires
-      });
-
-      // Also update the CSRF token cookie expiration
-      const csrfToken = event.cookies.get('csrf_token');
-      if (csrfToken) {
-        event.cookies.set('csrf_token', csrfToken, {
-          path: '/',
-          httpOnly: false,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
-          expires
-        });
-      }
+// Runs after authentication, including on auth-public paths such as login/logout.
+// Compare the browser Origin to the framework URL without consuming the body.
+const csrfMiddleware: Handle = ({ event, resolve }) => {
+  if (!safeMethods.has(event.request.method)
+    && event.request.headers.get('origin') !== event.url.origin) {
+    logger.warn('CSRF origin denied');
+    const options = { status: 403, headers: { 'Cache-Control': 'private, no-store' } };
+    if (event.url.pathname.startsWith('/api/')) {
+      return json({ error: 'Forbidden', code: 'CSRF_ORIGIN_DENIED' }, options);
     }
-    // For session cookies, we don't need to update anything
+    return new Response('Forbidden', options);
   }
 
   return resolve(event);
@@ -187,15 +152,50 @@ const securityHeadersMiddleware: Handle = async ({ event, resolve }) => {
   // Add security headers
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
-  response.headers.set('X-XSS-Protection', '1; mode=block');
-  response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  response.headers.set('Referrer-Policy', 'no-referrer');
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  response.headers.delete('X-XSS-Protection');
+  if (event.url.protocol === 'https:') {
+    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  } else {
+    response.headers.delete('Strict-Transport-Security');
+  }
+  // Rendered HTML already has SvelteKit's CSP, including its bootstrap nonce.
+  // Early refusals, redirects and endpoint responses need a restrictive fallback.
+  if (!response.headers.has('Content-Security-Policy')) {
+    response.headers.set('Content-Security-Policy',
+      "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+  }
 
   return response;
 };
 
-// Export the middleware sequence
+function checkIsPrivateRequest(event: RequestEvent): boolean {
+  // Matched application routes are dynamic. Include errors beneath private URL
+  // prefixes even when no route matched; never infer an asset from its extension.
+  return event.route.id !== null || ['/api', '/card', '/markdown'].some(prefix =>
+    event.url.pathname === prefix || event.url.pathname.startsWith(`${prefix}/`));
+}
+
+const privateCacheMiddleware: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event);
+  if (!checkIsPrivateRequest(event)) return response;
+
+  response.headers.set('Cache-Control', 'private, no-store');
+  // Do not leave a higher-priority cache directive or a validator that lets
+  // SvelteKit turn protected HTML into a 304 after the hooks have returned.
+  for (const header of ['CDN-Cache-Control', 'Vercel-CDN-Cache-Control',
+    'Surrogate-Control', 'Expires', 'ETag', 'Last-Modified']) {
+    response.headers.delete(header);
+  }
+  return response;
+};
+
+// Cache and security policies wrap early refusals as well as resolved routes.
 export const handle = sequence(
+  privateCacheMiddleware,
+  securityHeadersMiddleware,
   httpsMiddleware,
   authMiddleware,
-  securityHeadersMiddleware
+  csrfMiddleware
 );

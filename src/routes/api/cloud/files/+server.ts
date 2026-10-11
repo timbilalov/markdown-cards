@@ -1,20 +1,36 @@
-import { cloudService } from '$lib/services/cloudService';
 import { json } from '@sveltejs/kit';
+import type { CloudStoragePort, CloudUnavailableReason } from '$lib/ports/cloudStorage';
+import type { CloudFileListResponse } from '$lib/types/cloud';
+import { createServerCloudStorage } from '$lib/server/cloud/serverCloudStorage';
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = async ({ request }) => {
+const headers = { 'Cache-Control': 'private, no-store' };
+const unavailableResponses: Record<CloudUnavailableReason, { status: number; error: string }> = {
+  auth: { status: 502, error: 'CLOUD_AUTH_FAILED' },
+  network: { status: 503, error: 'CLOUD_UNAVAILABLE' },
+  remote: { status: 502, error: 'CLOUD_REMOTE_ERROR' },
+  'invalid-response': { status: 502, error: 'CLOUD_INVALID_RESPONSE' }
+};
+
+export const GET: RequestHandler = async () => {
+  let storage: CloudStoragePort;
   try {
-    // Check if cloud service is authenticated (has access token)
-    if (!cloudService.isAuthenticated()) {
-      return new Response('Cloud service not configured', { status: 500 });
-    }
-
-    // Fetch list of files from Yandex Disk
-    const files = await cloudService.listFiles();
-
-    return json(files);
-  } catch (error: any) {
-    console.error('Error fetching files:', error);
-    return new Response(`Error fetching files: ${error.message}`, { status: 500 });
+    storage = createServerCloudStorage();
+  } catch {
+    return json({ success: false, error: 'CLOUD_NOT_CONFIGURED' }, { status: 503, headers });
   }
+
+  const result = await storage.list();
+  if (result.status === 'unavailable') {
+    const { status, error } = unavailableResponses[result.reason];
+    return json({ success: false, error }, { status, headers });
+  }
+
+  // Keep the existing browser envelope, exposing only metadata from the port.
+  const files: CloudFileListResponse = { _embedded: { items: result.entries.map(entry => ({
+    name: entry.path,
+    path: entry.path,
+    ...(entry.modifiedAt === undefined ? {} : { modified: new Date(entry.modifiedAt).toISOString() })
+  })) } };
+  return json(files, { headers });
 };

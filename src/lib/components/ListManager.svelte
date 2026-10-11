@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CardSection } from '../utils/markdownSerializer';
+  import type { CardSection } from '../domain/types';
 
   export let section: CardSection;
   export let onItemChange: (items: { text: string; checked: boolean }[]) => void;
@@ -13,7 +13,7 @@
   }
 
   function removeItem(index: number) {
-    const newItems = section.items.filter((_: any, i: number) => i !== index);
+    const newItems = section.items.filter((_, i) => i !== index);
     onItemChange(newItems);
   }
 
@@ -85,6 +85,7 @@
         {#if section.type === 'checklist'}
           <input
             type="checkbox"
+            aria-label={`Выполнено: ${item.text || "пункт " + (index + 1)}`}
             checked={item.checked}
             on:change={() => toggleChecked(index)}
           />
@@ -94,6 +95,7 @@
           bind:value={item.text}
           on:input={(e) => updateItemText(index, (e.target as HTMLInputElement).value)}
           placeholder="List item"
+          aria-label={`Пункт ${index + 1}`}
           class={`textarea item-text-content ${item.checked ? 'strikethrough' : ''}`}
         ></textarea>
 

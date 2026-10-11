@@ -89,7 +89,7 @@ export class PerformanceMonitor {
 
   // Get cache hit rate for a category
   getCacheHitRate(category: string): number {
-    const cacheCategory = `cache_${category}`;
+    const cacheCategory = category.startsWith('cache_') ? category : `cache_${category}`;
     const metrics = this.metrics[cacheCategory];
     if (!metrics || metrics.operations === 0) {
       return 0;

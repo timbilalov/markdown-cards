@@ -4,7 +4,7 @@ import {
   isAuthenticated,
   setAuthenticationStatus,
   logout,
-  checkAuthStatus
+  checkIsSessionAuthenticated
 } from '../stores/cloudStore';
 
 // Mock browser environment
@@ -14,11 +14,11 @@ vi.mock('$app/environment', () => ({
 
 // Mock fetch for API calls
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
 
 describe('CloudStore Authentication', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
 
     // Reset the isAuthenticated store
     setAuthenticationStatus(false);
@@ -54,7 +54,37 @@ describe('CloudStore Authentication', () => {
     });
   });
 
-  describe('checkAuthStatus Function', () => {
+  describe('checkIsSessionAuthenticated Function', () => {
+    it('does not cancel delivery when the same authenticated session is confirmed again', async () => {
+      setAuthenticationStatus(true);
+      const session = await import('../stores/sessionState');
+      const signal = session.sessionDeliverySignal(); const generation = session.sessionGeneration();
+      mockFetch.mockResolvedValue(Response.json({ authenticated: true }));
+      expect(await checkIsSessionAuthenticated()).toBe(true);
+      expect(signal.aborted).toBe(false);
+      expect(session.sessionDeliverySignal()).toBe(signal);
+      expect(session.sessionGeneration()).toBe(generation);
+    });
+
+    it('does not restore a session from a status response received after logout', async () => {
+      const pending = Promise.withResolvers<Response>();
+      mockFetch.mockReturnValueOnce(pending.promise);
+      setAuthenticationStatus(true);
+      const checking = checkIsSessionAuthenticated();
+      mockFetch.mockResolvedValueOnce(Response.json({ success: true }));
+      await logout();
+      pending.resolve(Response.json({ authenticated: true }));
+      expect(await checking).toBe(false);
+      expect(get(isAuthenticated)).toBe(false);
+    });
+
+    it.each([Response.json({ authenticated: 'true' }), Response.json({ authenticated: true }, { status: 503 })])(
+      'requires a successful response with a boolean session confirmation', async response => {
+        mockFetch.mockResolvedValue(response);
+        expect(await checkIsSessionAuthenticated()).toBe(false);
+        expect(get(isAuthenticated)).toBe(false);
+      }
+    );
     it('should set isAuthenticated to true when API returns authenticated', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
@@ -64,7 +94,7 @@ describe('CloudStore Authentication', () => {
         })
       });
 
-      const result = await checkAuthStatus();
+      const result = await checkIsSessionAuthenticated();
 
       expect(result).toBe(true);
       expect(get(isAuthenticated)).toBe(true);
@@ -80,7 +110,7 @@ describe('CloudStore Authentication', () => {
         })
       });
 
-      const result = await checkAuthStatus();
+      const result = await checkIsSessionAuthenticated();
 
       expect(result).toBe(false);
       expect(get(isAuthenticated)).toBe(false);
@@ -90,7 +120,7 @@ describe('CloudStore Authentication', () => {
     it('should set isAuthenticated to false when API call fails', async () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
-      const result = await checkAuthStatus();
+      const result = await checkIsSessionAuthenticated();
 
       expect(result).toBe(false);
       expect(get(isAuthenticated)).toBe(false);

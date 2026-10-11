@@ -1,5 +1,8 @@
-import type { CloudFileListResponse, CloudUploadUrlResponse } from '../types/cloud';
-import { dbService } from './dbService';
+import type { CloudFile, CloudFileListResponse } from '../types/cloud';
+import { expireSession, sessionGeneration } from '../stores/sessionState';
+import { cloudRequestSignal } from '../utils/cloudRequestSignal';
+import { cloudErrorReason } from '../utils/cloudErrorReason';
+import { checkIsMarkdownFilename } from '../domain/markdownFilename';
 
 // Error types for better error handling
 export class CloudError extends Error {
@@ -23,233 +26,86 @@ export class CloudNetworkError extends CloudError {
   }
 }
 
+function checkIsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function checkIsCanonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
+
+// Validate the complete HTTP DTO before a caller can publish or cache any item.
+// Return fresh objects so provider URLs and other extra fields stay outside it.
+function parseCloudFileList(value: unknown): CloudFileListResponse | null {
+  if (!checkIsRecord(value) || !checkIsRecord(value._embedded)
+    || !Array.isArray(value._embedded.items)) return null;
+
+  const names = new Set<string>();
+  const items: CloudFile[] = [];
+  for (const entry of value._embedded.items) {
+    if (!checkIsRecord(entry) || !checkIsMarkdownFilename(entry.name)
+      || entry.path !== entry.name || names.has(entry.name)) return null;
+    if ('modified' in entry && !checkIsCanonicalTimestamp(entry.modified)) return null;
+    names.add(entry.name);
+    items.push({ name: entry.name, path: entry.name,
+      ...(typeof entry.modified === 'string' ? { modified: entry.modified } : {}) });
+  }
+  return { _embedded: { items } };
+}
+
+// Browser read transport. Provider credentials and writes belong to server routes.
 export class CloudService {
-  private readonly API_BASE = 'https://cloud-api.yandex.net/v1/disk';
-  private accessToken: string | null = null;
-  private basePath: string = 'md-cards';
-
-  constructor() {
-    // Initialize with the token from environment variables
-    if (typeof window !== 'undefined') {
-      // Client-side: get from Vite environment variables
-      this.accessToken = import.meta.env.VITE_YANDEX_DISK_TOKEN || null;
-    } else {
-      // Server-side: get from process.env
-      this.accessToken = process.env.VITE_YANDEX_DISK_TOKEN || null;
-    }
-  }
-
-  // This method is kept for backward compatibility but will only work on the client side
-  setAccessToken(token: string | null): void {
-    if (typeof window !== 'undefined') {
-      this.accessToken = token;
-    }
-  }
-
-  setBasePath(path: string): void {
-    this.basePath = path;
-  }
-
-  private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
-      'Accept': 'application/json',
-    };
-
-    if (this.accessToken) {
-      headers['Authorization'] = `OAuth ${this.accessToken}`;
-    }
-
-    return headers;
-  }
-
-  private async handleResponse<T>(response: Response): Promise<T> {
+  private async handleResponse<T>(response: Response, generation: number): Promise<T> {
     if (!response.ok) {
-      // Handle specific error cases
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) expireSession(generation);
+      // Provider auth failures use the server's 502 envelope, whereas the
+      // browser session uses 401/403. Both require credentials, not backoff.
+      const body: unknown = await response.json().catch(() => null);
+      const reason = cloudErrorReason(response.status, checkIsRecord(body) ? body.error : undefined);
+      if (reason === 'auth') {
         throw new CloudAuthError('Authentication failed');
       }
 
-      if (response.status >= 500) {
+      if (reason === 'network') {
         throw new CloudNetworkError(`Server error: ${response.status}`);
       }
+
+      if (reason === 'invalid-response') throw new CloudError('Invalid provider response', 'INVALID_RESPONSE');
 
       throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
     }
     return await response.json();
   }
 
-  // Utility function to handle network operations with retry logic
-  private async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    maxRetries: number = 3,
-    delay: number = 1000
-  ): Promise<T> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error as Error;
-
-        // Don't retry for authentication errors
-        if (error instanceof CloudAuthError) {
-          throw error;
-        }
-
-        // If this is the last attempt, throw the error
-        if (attempt === maxRetries) {
-          throw error;
-        }
-
-        // Wait before retrying with exponential backoff
-        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, attempt)));
-      }
+  // Browser listing uses the server session and private storage configuration.
+  async listFiles(signal?: AbortSignal): Promise<CloudFileListResponse> {
+    const generation = sessionGeneration();
+    signal = cloudRequestSignal(signal);
+    let response: Response;
+    try {
+      response = await fetch('/api/cloud/files', { method: 'GET', signal });
+    } catch {
+      throw new CloudNetworkError('Failed to fetch cloud file list');
     }
 
-    throw lastError;
-  }
-
-  // Fetch list of files from Yandex Disk
-  async listFiles(): Promise<CloudFileListResponse> {
-    if (!this.accessToken) {
-      throw new CloudAuthError('Access token not set');
+    let body: unknown;
+    try {
+      body = await this.handleResponse<unknown>(response, generation);
+    } catch (error) {
+      if (error instanceof CloudAuthError) throw error;
+      if (signal.aborted) throw new CloudNetworkError('Cloud listing cancelled');
+      if (error instanceof CloudError) throw error;
+      throw new CloudError('Invalid cloud file list response', 'INVALID_RESPONSE');
     }
+    const data = parseCloudFileList(body);
+    if (!data) throw new CloudError('Invalid cloud file list response', 'INVALID_RESPONSE');
+    if (signal.aborted) throw new CloudNetworkError('Cloud listing cancelled');
 
-    return await this.executeWithRetry(async () => {
-      const url = `${this.API_BASE}/resources?path=${encodeURIComponent(this.basePath)}`;
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: this.getHeaders()
-      });
-
-      const data = await this.handleResponse<CloudFileListResponse>(response);
-
-      // Cache the file list in IndexedDB
-      if (data._embedded && data._embedded.items && Array.isArray(data._embedded.items)) {
-        for (const file of data._embedded.items) {
-          await dbService.saveCloudFile(file);
-        }
-      }
-
-      return data;
-    });
+    return data;
   }
 
-  // Download file content from Yandex Disk
-  async downloadFile(fileUrl: string): Promise<string> {
-    // When running on the client, use the proxy endpoint to avoid CORS issues
-    if (typeof window !== 'undefined') {
-      return await this.executeWithRetry(async () => {
-        // Use our proxy endpoint to avoid CORS issues
-        const proxyUrl = `/api/cloud/download?url=${encodeURIComponent(fileUrl)}`;
-        const response = await fetch(proxyUrl, {
-          method: 'GET'
-        });
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            throw new CloudAuthError('Authentication failed');
-          }
-
-          if (response.status >= 500) {
-            throw new CloudNetworkError(`Server error: ${response.status}`);
-          }
-
-          throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
-        }
-
-        return await response.text();
-      });
-    } else {
-      // Server-side: make direct request to Yandex Disk
-      if (!this.accessToken) {
-        throw new CloudAuthError('Access token not set');
-      }
-
-      return await this.executeWithRetry(async () => {
-        const response = await fetch(fileUrl, {
-          method: 'GET',
-          headers: this.getHeaders()
-        });
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            throw new CloudAuthError('Authentication failed');
-          }
-
-          if (response.status >= 500) {
-            throw new CloudNetworkError(`Server error: ${response.status}`);
-          }
-
-          throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
-        }
-
-        return await response.text();
-      });
-    }
-  }
-
-  // Get upload URL from Yandex Disk
-  async getUploadUrl(filePath: string, overwrite: boolean = true): Promise<CloudUploadUrlResponse> {
-    if (!this.accessToken) {
-      throw new CloudAuthError('Access token not set');
-    }
-
-    return await this.executeWithRetry(async () => {
-      const fullPath = `${this.basePath}/${filePath}`;
-      const url = `${this.API_BASE}/resources/upload?path=${encodeURIComponent(fullPath)}&overwrite=${overwrite}`;
-
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: this.getHeaders()
-      });
-
-      return await this.handleResponse<CloudUploadUrlResponse>(response);
-    });
-  }
-
-  // Upload file content to Yandex Disk
-  async uploadFile(uploadUrl: string, fileContent: string): Promise<void> {
-    if (!this.accessToken) {
-      throw new CloudAuthError('Access token not set');
-    }
-
-    return await this.executeWithRetry(async () => {
-      const response = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `OAuth ${this.accessToken}`,
-          'Content-Type': 'text/plain'
-        },
-        body: fileContent
-      });
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          throw new CloudAuthError('Authentication failed');
-        }
-
-        if (response.status >= 500) {
-          throw new CloudNetworkError(`Server error: ${response.status}`);
-        }
-
-        throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
-      }
-    });
-  }
-
-  // Upload a file in one step (get URL + upload)
-  async uploadFileAtPath(filePath: string, fileContent: string, overwrite: boolean = true): Promise<void> {
-    const uploadInfo = await this.getUploadUrl(filePath, overwrite);
-    await this.uploadFile(uploadInfo.href, fileContent);
-  }
-
-  // Check if we're authenticated
-  isAuthenticated(): boolean {
-    return !!this.accessToken;
-  }
 }
 
-// Export singleton instance
 export const cloudService = new CloudService();

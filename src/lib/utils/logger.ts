@@ -10,7 +10,7 @@ interface LogEntry {
   timestamp: Date;
   level: LogLevel;
   message: string;
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 }
 
 /**
@@ -28,7 +28,7 @@ class Logger {
    * @param message - The message to log
    * @param meta - Additional metadata
    */
-  debug(message: string, meta?: Record<string, any>) {
+  debug(message: string, meta?: Record<string, unknown>) {
     this.log('debug', message, meta);
   }
 
@@ -37,7 +37,7 @@ class Logger {
    * @param message - The message to log
    * @param meta - Additional metadata
    */
-  info(message: string, meta?: Record<string, any>) {
+  info(message: string, meta?: Record<string, unknown>) {
     this.log('info', message, meta);
   }
 
@@ -46,7 +46,7 @@ class Logger {
    * @param message - The message to log
    * @param meta - Additional metadata
    */
-  warn(message: string, meta?: Record<string, any>) {
+  warn(message: string, meta?: Record<string, unknown>) {
     this.log('warn', message, meta);
   }
 
@@ -55,7 +55,7 @@ class Logger {
    * @param message - The message to log
    * @param meta - Additional metadata
    */
-  error(message: string, meta?: Record<string, any>) {
+  error(message: string, meta?: Record<string, unknown>) {
     this.log('error', message, meta);
   }
 
@@ -65,9 +65,9 @@ class Logger {
    * @param message - The message to log
    * @param meta - Additional metadata
    */
-  private log(level: LogLevel, message: string, meta?: Record<string, any>) {
+  private log(level: LogLevel, message: string, meta?: Record<string, unknown>) {
     // Check if we should log this level
-    if (!this.shouldLog(level)) {
+    if (!this.checkShouldLog(level)) {
       return;
     }
 
@@ -111,7 +111,7 @@ class Logger {
    * @param level - The log level to check
    * @returns True if the level should be logged, false otherwise
    */
-  private shouldLog(level: LogLevel): boolean {
+  private checkShouldLog(level: LogLevel): boolean {
     const levels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
     const currentLevelIndex = levels.indexOf(this.logLevel);
     const levelIndex = levels.indexOf(level);
