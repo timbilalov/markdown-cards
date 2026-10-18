@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import type { ProductionWorkerMessage, ProductionResponse } from './productionHttp';
 
-// Child process: native Request/Response and the actual generated Vercel entry.
+// Child process: native Request/Response and the actual generated platform entry.
 // Only external I/O is substituted; no framework, auth, route or config mocks.
 let effects: ProductionResponse['effects'];
 let requestNumber = 0;
@@ -73,7 +73,7 @@ Object.defineProperty(globalThis, 'indexedDB', { value: {
 try {
   const application = (await import(pathToFileURL(process.argv[2]).href)).default as {
     fetch(request: Request): Promise<Response>;
-  };
+  } | ((request: Request, context: { ip: string }) => Promise<Response>);
   let queue = Promise.resolve();
   process.on('message', (message: ProductionWorkerMessage) => {
     queue = queue.then(async () => {
@@ -87,7 +87,8 @@ try {
         const headers = new Headers(input.headers);
         // Keep rate limiting outside this contract; never reuse a test client IP.
         const clientNumber = ++requestNumber;
-        headers.set('x-forwarded-for', `198.18.${Math.floor(clientNumber / 256)}.${clientNumber % 256}`);
+        const clientIP = `198.18.${Math.floor(clientNumber / 256)}.${clientNumber % 256}`;
+        headers.set('x-forwarded-for', clientIP);
         let body: BodyInit | undefined = input.bodyBytes === undefined ? input.body : new Uint8Array(input.bodyBytes);
         if (input.form) {
           const form = new FormData();
@@ -95,7 +96,9 @@ try {
           body = form;
         }
         const request = new Request(input.url, { method: input.method ?? 'GET', headers, body });
-        const response = await application.fetch(request);
+        const response = typeof application === 'function'
+          ? await application(request, { ip: clientIP })
+          : await application.fetch(request);
         const result: ProductionResponse = {
           status: response.status, headers: Object.fromEntries(response.headers),
           cookies: response.headers.getSetCookie(), text: await response.text(),

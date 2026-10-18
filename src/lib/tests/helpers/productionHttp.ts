@@ -47,14 +47,41 @@ interface WorkerReply {
 
 const execute = promisify(execFile);
 
+const productionTargets: Record<string, {
+  publicDirectory: string;
+  resolveEntry: (directory: string) => Promise<string>;
+}> = {
+  vercel: {
+    publicDirectory: '.vercel/output/static',
+    async resolveEntry(directory) {
+      const functionDirectory = join(directory, '.vercel/output/functions/![-]/catchall.func');
+      const configuration = JSON.parse(await readFile(join(functionDirectory, '.vc-config.json'), 'utf8')) as { handler: string };
+      return resolve(functionDirectory, configuration.handler);
+    }
+  },
+  netlify: {
+    publicDirectory: 'build',
+    async resolveEntry(directory) {
+      return join(directory, '.netlify/functions-internal/sveltekit-render.mjs');
+    }
+  }
+};
+
 // Build the actual working sources/config in isolation on every suite invocation.
 // Never consume stale repository output or load the developer's env files.
 export async function createProductionHttp() {
   const root = resolve(import.meta.dirname, '../../../..');
+  const target = process.env.PRODUCTION_TEST_TARGET ?? 'vercel';
+  if (!Object.hasOwn(productionTargets, target)) {
+    throw new Error(`Unknown PRODUCTION_TEST_TARGET "${target}". Supported targets: ${Object.keys(productionTargets).join(', ')}.`);
+  }
+  const deployment = productionTargets[target];
   const directory = await mkdtemp(join(tmpdir(), 'markdown-cards-http-'));
+  const publicRoot = join(directory, deployment.publicDirectory);
   let child: ChildProcess | undefined;
   const environment = {
     PATH: process.env.PATH ?? '', NODE_ENV: 'production',
+    DEPLOY_TARGET: target,
     ADMIN_USERNAME: productionCredentials.username,
     ADMIN_PASSWORD_HASH: productionPasswordHash,
     SESSION_SECRET: productionSessionSecret,
@@ -72,8 +99,9 @@ export async function createProductionHttp() {
   }
   try {
     await Promise.all([
-      ...['package.json', 'svelte.config.js', 'vite.config.ts', 'tsconfig.json', 'vercel.json'].map(
+      ...['package.json', 'svelte.config.js', 'vite.config.ts', 'tsconfig.json', 'vercel.json', 'netlify.toml'].map(
         name => cp(join(root, name), join(directory, name))),
+      cp(join(root, 'config'), join(directory, 'config'), { recursive: true }),
       cp(join(root, 'src'), join(directory, 'src'), {
         recursive: true, filter: source => source !== join(root, 'src/lib/tests')
       }),
@@ -84,9 +112,7 @@ export async function createProductionHttp() {
       cwd: directory, env: environment, timeout: 60_000, maxBuffer: 4 * 1024 * 1024
     });
 
-    const functionDirectory = join(directory, '.vercel/output/functions/![-]/catchall.func');
-    const configuration = JSON.parse(await readFile(join(functionDirectory, '.vc-config.json'), 'utf8')) as { handler: string };
-    const entry = resolve(functionDirectory, configuration.handler);
+    const entry = await deployment.resolveEntry(directory);
     child = fork(join(root, 'src/lib/tests/helpers/productionHttpWorker.ts'), [entry], {
       cwd: directory, env: environment, execArgv: ['--import', 'tsx'], silent: true
     });
@@ -125,7 +151,6 @@ export async function createProductionHttp() {
     return {
       // Read emitted font/image bytes without passing binary data through UTF-8.
       async readClientAssetBytes(path: string): Promise<Uint8Array> {
-        const publicRoot = join(directory, '.vercel/output/static');
         const file = resolve(publicRoot, path);
         if (!file.startsWith(publicRoot + '/')) throw new Error('Invalid public asset path');
         return new Uint8Array(await readFile(file));
@@ -133,7 +158,6 @@ export async function createProductionHttp() {
       // Inspect every emitted public file, including HTML/CSS/maps if present.
       // Server chunks are deliberately outside this public-output boundary.
       async readClientAssets(): Promise<{ path: string; content: string }[]> {
-        const publicRoot = join(directory, '.vercel/output/static');
         const assets: { path: string; content: string }[] = [];
         async function visit(relative: string): Promise<void> {
           for (const entry of await readdir(join(publicRoot, relative), { withFileTypes: true })) {

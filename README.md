@@ -38,7 +38,7 @@ npm run dev
 Первая команда печатает случайный пароль и bcrypt-хеш, вторая — ключ сессии.
 Генератор ничего не записывает в `.env`. Для локального файла скопируйте значение
 из строки `Local .env`: символы `$` в хеше экранируются как `\$`, чтобы Vite не
-выполнил подстановку переменных. В окружение сервера/Vercel внесите **обычный хеш
+выполнил подстановку переменных. В окружение сервера/Vercel/Netlify внесите **обычный хеш
 без обратных слешей**. После изменения `.env` перезапустите dev-сервер.
 
 Откройте адрес, показанный Vite, и войдите с заданными логином и паролем.
@@ -152,11 +152,71 @@ Offline работает для уже загруженного приложен
 
 ## Deployment и безопасность
 
-`npm run build` использует `@sveltejs/adapter-vercel` и создаёт `.vercel/output`.
-На Vercel задайте те же private-переменные, Node 24 и команду сборки `npm run build`.
-`vercel.json` не переопределяет output directory и не перенаправляет запросы в
-`src/routes`: маршрутизацию генерирует адаптер. Для иной платформы заменяется
-адаптер в `svelte.config.js`; domain/application от Vercel не зависят.
+Один GitHub-репозиторий можно подключить одновременно к Vercel и Netlify.
+Каждая платформа самостоятельно собирает и публикует новые коммиты выбранной
+ветки. `svelte.config.js` получает адаптер из реестра площадок
+`config/deploymentAdapters.js`:
+
+| Окружение сборки | Адаптер | Результат |
+| --- | --- | --- |
+| Netlify (`NETLIFY=true`) или `DEPLOY_TARGET=netlify` | `@sveltejs/adapter-netlify`, Node Functions | `build` и `.netlify` |
+| Vercel (`VERCEL=1`) или `DEPLOY_TARGET=vercel` | `@sveltejs/adapter-vercel` | `.vercel/output` |
+
+`DEPLOY_TARGET` имеет приоритет над автоопределением. Без явного выбора и признаков
+площадки используется Vercel, как в прежних локальных сборках. Неизвестный
+`DEPLOY_TARGET` или одновременное обнаружение нескольких площадок без явного выбора
+останавливает сборку с ошибкой.
+
+Для новой площадки добавьте в `PLATFORMS` её фабрику `create` и правило `detect`,
+а также установите нужный адаптер. Затем площадку можно выбирать через
+`DEPLOY_TARGET` без изменений в `svelte.config.js`. Сейчас зарегистрированы Vercel
+и Netlify; подключение Layero потребует отдельной записи и Node-адаптера.
+
+На Vercel остаются прежние настройки: private-переменные из раздела «Запуск»,
+Node 24 и команда сборки `npm run build`. `vercel.json` не переопределяет output
+directory и не перенаправляет запросы в `src/routes`: маршрутизацию генерирует
+адаптер.
+
+### Настройка Netlify
+
+1. В панели Netlify создайте проект через **Import an existing project → GitHub**.
+   Выберите тот же репозиторий и основную ветку, которая используется на Vercel.
+2. Оставьте Base directory корнем репозитория. Настройки из `netlify.toml`:
+   Build command — `npm run build`, Publish directory — `build`.
+   Node берётся из `.nvmrc` (24.21.0), npm закреплён в `netlify.toml` (11.19.0).
+   Functions directory вручную указывать не нужно: функции и маршруты создаёт
+   адаптер. Edge Functions не используются.
+3. В **Project configuration → Environment variables** добавьте значения
+   `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET`,
+   `CLOUD_STORAGE_PROVIDER=yandex`, `YANDEX_DISK_TOKEN`, `YANDEX_DISK_BASE_PATH`.
+   Для Production они должны быть доступны серверным Functions; можно выбрать
+   All scopes. Хеш пароля вставляется без экранирования `$` обратными слешами.
+   Значения секретов не записывайте в `netlify.toml` или Git.
+4. Там же добавьте `AWS_LAMBDA_JS_RUNTIME=nodejs24.x`, чтобы явно выбрать
+   Node 24 для функций. Эта переменная задаётся через панель, а не `netlify.toml`.
+   `NETLIFY=true` вручную добавлять не требуется.
+5. Запустите Deploy (после изменения переменных — новый Deploy). Если панель
+   предлагает Publish, опубликуйте проект. Проверьте HTTPS-адрес `*.netlify.app`:
+   вход, список заметок, открытие, сохранение на Яндекс Диск и выход.
+
+Для Deploy Previews и branch deploys задайте нужные значения переменных отдельно
+в соответствующих deploy contexts, если планируете пользоваться этими копиями.
+
+Если обе платформы используют одинаковые токен и папку Яндекс Диска, сохранённые
+заметки у них общие. Cookies, IndexedDB, кеш и ожидающие отправки изменения
+принадлежат адресу сайта: на новом адресе нужен отдельный вход, а локальные
+снимки с Vercel автоматически на Netlify не переносятся. Перед переключением
+адреса дождитесь подтверждённого сохранения на Диске.
+
+Локальная проверка сборок на Node из `.nvmrc`:
+
+```sh
+npm run build                 # Vercel
+DEPLOY_TARGET=vercel npm run build   # явный выбор Vercel
+DEPLOY_TARGET=netlify npm run build  # явный выбор Netlify
+```
+
+### Безопасность
 
 Production требует HTTPS. Все экземпляры сервера должны использовать один
 `SESSION_SECRET`; его смена делает существующие сессии недействительными.
@@ -181,13 +241,28 @@ DOMPurify. CSP разрешает bootstrap через nonce и один фик�
 ## Проверки
 
 ```sh
-npm run validate            # типы, unit/integration, production build
+npm run validate               # типы, unit/integration, все production-тесты, сборка
+npm run test:run               # unit/integration без production HTTP-набора
+npm run test:production         # последовательно все площадки из PLATFORMS
+npm run test:production:vercel   # production HTTP-контракты через Vercel
+npm run test:production:netlify  # те же production HTTP-контракты через Netlify
 npx playwright install chromium  # однократно для browser E2E
 npm run test:e2e
+PRODUCTION_TEST_TARGET=netlify npm run test:e2e  # browser E2E через Netlify
 ```
+
+`validate` последовательно запускает `check`, `test:run`, `test:production`
+и `build`. Production HTTP-набор исключён из `test:run`, поэтому в `validate`
+он выполняется только через `test:production` — по одному разу для каждой площадки.
+
+`test:production` перебирает реестр `PLATFORMS` и останавливается при первом
+неуспешном прогоне. Параметры после `--` передаются каждому запуску Vitest,
+например `npm run test:production -- --maxWorkers=2`.
 
 E2E строит текущие исходники во временной папке и запускает настоящий Chromium:
 production HTML/API/assets, реальная IndexedDB, Web Locks, cookies и CSP.
+По умолчанию проверяется Vercel entry; `PRODUCTION_TEST_TARGET=netlify` выбирает
+сборку и настоящий Node Functions entry Netlify.
 Подменено внешнее облако: используется изолированный провайдер в памяти.
 Пользовательская `.env` и реальные заметки на Диске в тесты не копируются.
 

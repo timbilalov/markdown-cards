@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-vercel';
+import { createDeploymentAdapter } from './config/deploymentAdapters.js';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /** @type {import('@sveltejs/kit').Config} */
@@ -8,9 +8,7 @@ const config = {
 	preprocess: vitePreprocess(),
 
 	kit: {
-		// Using Vercel adapter for deployment to Vercel
-		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-		adapter: adapter(),
+		adapter: createDeploymentAdapter(),
 		// SvelteKit authorizes its own inline bootstrap with a per-response nonce.
 		csp: {
 			mode: 'auto',
