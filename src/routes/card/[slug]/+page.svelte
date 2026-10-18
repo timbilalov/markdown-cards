@@ -3,7 +3,7 @@
   import CombinedCardView from '../../../lib/components/CombinedCardView.svelte';
   import MarkdownPreview from '../../../lib/components/MarkdownPreview.svelte';
   import {
-    cardLoading, cardLoadSource, cardLoadTime, isOffline, cardStore,
+    cardLoading, cardLoadSource, cardLoadTime, cardLoadWarning, isOffline, cardStore,
     cardDocument, cardSaveMessage,
     getCardDocumentSource, getCardDocumentMessage
   } from '../../../lib/stores/cardStore';
@@ -58,7 +58,7 @@
   {:else}
     <div class="status-bar">
       {#if $cardLoadSource}
-        <span class="tag is-success">Loaded from {$cardLoadSource} in {$cardLoadTime.toFixed(2)}ms</span>
+        <span class="tag" class:is-success={$cardLoadSource === 'cloud'} class:is-warning={$cardLoadSource === 'indexeddb'}>Loaded from {$cardLoadSource} in {$cardLoadTime.toFixed(2)}ms</span>
       {/if}
 
       {#if $isOffline}
@@ -69,6 +69,10 @@
         Switch to {viewMode === 'combined' ? 'Markdown' : 'Editor'} View
       </button>
     </div>
+
+    {#if $cardLoadWarning}
+      <p role="alert" class="notification is-warning">{$cardLoadWarning}</p>
+    {/if}
 
     {#if isBlocked && document}
       <div class="toolbar">

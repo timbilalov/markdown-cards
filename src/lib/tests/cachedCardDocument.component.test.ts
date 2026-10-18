@@ -123,6 +123,74 @@ async function clickSave() {
 }
 
 describe('editor recovery: actual page from cached Markdown', () => {
+  it.each([
+    ['CLOUD_REMOTE_ERROR', /Диск вернул ошибку/],
+    ['CLOUD_AUTH_FAILED', /авторизации.*Диска/],
+    ['CLOUD_INVALID_RESPONSE', /некорректный ответ Диска/],
+    ['CLOUD_UNAVAILABLE', /соединиться с Диском/]
+  ])('explains %s when a listed file cannot be downloaded and clears the warning after recovery', async (error, message) => {
+    const cached = v1.replace('# Карточка 🗂', '# Cached copy');
+    await db.saveMarkdownDocument(filename, cached);
+    seedRemote(v1);
+    onDocumentDownload(remote.http, { name: `${filename}.md` },
+      () => Response.json({ success: false, error }, { status: error === 'CLOUD_UNAVAILABLE' ? 503 : 502 }));
+
+    await openPage();
+
+    expect(requireTitle().value).toBe('Cached copy');
+    expect(get(cards.cardLoadSource)).toBe('indexeddb');
+    expect(target.querySelector('.status-bar .tag.is-warning')?.textContent).toContain('indexeddb');
+    expect(target.querySelector('.status-bar .tag.is-success')).toBeNull();
+    const warning = target.querySelector('[role="alert"]');
+    expect(warning?.textContent).toMatch(message);
+    expect(warning?.textContent).toMatch(/локальная копия.*актуальность.*не проверена/i);
+    expect(await db.getMarkdownDocument(filename)).toMatchObject({ result: { document: { source: cached } } });
+    expect(remote.uploads).toEqual([]);
+    cards.cardSaveMessage.set(null);
+    runtime.flushSync();
+    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(message);
+
+    seedRemote(v1);
+    await reopenPage();
+
+    expect(requireTitle().value).toBe('Карточка 🗂');
+    expect(get(cards.cardLoadSource)).toBe('cloud');
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+    expect(target.querySelector('.status-bar .tag.is-success')?.textContent).toContain('cloud');
+  });
+
+  it('explains a Disk download failure without a cached source instead of asking for an unexplained reload', async () => {
+    seedRemote(v1);
+    onDocumentDownload(remote.http, { name: `${filename}.md` },
+      () => Response.json({ success: false, error: 'CLOUD_REMOTE_ERROR' }, { status: 502 }));
+
+    await openPage();
+
+    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(/Диск вернул ошибку.*Локальная копия отсутствует/);
+    expect(target.querySelector('input[placeholder="Card title"]')).toBeNull();
+    expect(requireButton(/^Save$/).disabled).toBe(true);
+    expect(get(cards.cardLoadSource)).toBeNull();
+    expect(remote.uploads).toEqual([]);
+  });
+
+  it('clears the cached-load warning when an explicit Save is later confirmed on Disk', async () => {
+    await db.saveMarkdownDocument(filename, v1);
+    seedRemote(v1);
+    onDocumentDownload(remote.http, { name: `${filename}.md` },
+      () => Response.json({ success: false, error: 'CLOUD_REMOTE_ERROR' }, { status: 502 }));
+    await openPage();
+    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(/Диск вернул ошибку/);
+
+    seedRemote(v1);
+    editTitle('Saved after recovery');
+    await clickSave();
+
+    expect(remote.files.get(`${filename}.md`)).toContain('# Saved after recovery');
+    expect(get(cards.cardLoadWarning)).toBeNull();
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+    expect(target.querySelector('[role="status"]')?.textContent).toMatch(/Сохранено на Яндекс Диске/);
+  });
+
   it('migrates cached legacy explicitly offline, persists on Save and reopens the local v1 without the migration button', async () => {
     const source = legacy.replaceAll('\n', '\r\n');
     const expected = migrated.replace('2026-09-24T00:00:00.000Z', new Date(NOW).toISOString());

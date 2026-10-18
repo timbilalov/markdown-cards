@@ -5,7 +5,7 @@ import type { OutboxDeliveryOutcome, OutboxOperation } from '../domain/outbox';
 import type { CardSaveSnapshot } from '../ports/cardSaveRepository';
 import type { CardSaveRepository } from '../ports/cardSaveRepository';
 import type { OutboxRepository } from '../ports/outboxRepository';
-import type { CloudStoragePort } from '../ports/cloudStorage';
+import type { CloudStoragePort, CloudUnavailableReason } from '../ports/cloudStorage';
 import type { RemoteMarkdownCacheRefresh, RemoteMarkdownCacheResult } from '../ports/remoteMarkdownCacheRepository';
 
 export interface EditBase { base: RemoteBase; baseSource?: string; previousSaveId?: string }
@@ -19,6 +19,7 @@ export interface DeliveryStatusResult { status: SyncStatus; saveId?: string }
 export interface LoadedSource extends EditBase {
   source: string; origin: 'local' | 'cloud'; saveMode: 'create' | 'update';
   status: SyncStatus; saveId?: string; readOnly?: boolean;
+  loadFailure?: CloudUnavailableReason;
 }
 export interface SyncDependencies {
   saves: CardSaveRepository;
@@ -223,7 +224,7 @@ export class CardSync {
     }
   }
 
-  async load(path: string, options: { projectCard?: boolean; listed?: boolean; modifiedAt?: number; expectedCards?: Card[]; checkIsCurrent?: () => boolean; signal?: AbortSignal } = {}): Promise<LoadedSource | { status: SyncStatus; detail?: string; projection?: Card }> {
+  async load(path: string, options: { projectCard?: boolean; listed?: boolean; modifiedAt?: number; expectedCards?: Card[]; checkIsCurrent?: () => boolean; signal?: AbortSignal } = {}): Promise<LoadedSource | { status: SyncStatus; detail?: string; projection?: Card; loadFailure?: CloudUnavailableReason }> {
     if (options.signal?.aborted) return { status: 'pending' };
     if (!checkIsMarkdownFilename(path)) return { status: 'validation-error' };
     const filename = path.slice(0, -3);
@@ -239,6 +240,7 @@ export class CardSync {
         return { status: 'synced', projection };
       }
       let status: SyncStatus = 'offline';
+      let loadFailure: CloudUnavailableReason | undefined;
       if (this.deps.checkIsOnline()) {
         if (options.signal?.aborted || options.checkIsCurrent && !options.checkIsCurrent()) return { status: 'pending' };
         const remote = await (options.listed && this.deps.readListed ? this.deps.readListed(path, options.signal)
@@ -269,10 +271,12 @@ export class CardSync {
         }
         status = remote.status === 'not-found' ? 'not-found' : remote.status === 'invalid' ? 'validation-error'
           : remote.reason === 'auth' ? 'unauthorized' : 'remote-unavailable';
+        if (remote.status === 'unavailable') loadFailure = remote.reason;
       }
+      const failure = loadFailure === undefined ? {} : { loadFailure };
       if (cached !== null) return { status, source: cached, origin: 'local', saveMode: 'update',
-        base: { kind: 'present', revision: null }, baseSource: cached, readOnly: status === 'not-found' };
-      return { status };
+        base: { kind: 'present', revision: null }, baseSource: cached, readOnly: status === 'not-found', ...failure };
+      return { status, ...failure };
     } catch (error) { return { status: 'storage-error', detail: error instanceof Error ? error.message : undefined }; }
   }
 

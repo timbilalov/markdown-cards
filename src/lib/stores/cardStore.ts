@@ -5,6 +5,7 @@ import { migrateMarkdownDocument } from '../domain/markdownMigration';
 import { browser } from '$app/environment';
 import type { Card, MarkdownMigrationResult, MarkdownParseResult } from '../domain/types';
 import type { EditBase } from '../application/cardSync';
+import type { CloudUnavailableReason } from '../ports/cloudStorage';
 import { getCardSync, retryCardSync, describeSyncStatus } from '../services/cardSyncRuntime';
 import { syncFilesFromCloud } from './cloudStore';
 
@@ -14,6 +15,7 @@ export const cardStore = stateField('card');
 export const cardLoading = stateField('loading');
 export const cardLoadSource = stateField('loadSource');
 export const cardLoadTime = stateField('loadTime');
+export const cardLoadWarning = stateField('loadWarning');
 
 // Save status
 export const cardSaving = stateField('saving');
@@ -38,6 +40,15 @@ export const cardDeliveryStatus = stateField('delivery');
 export const cardDocument: Readable<OpenedCardDocument | null> = { subscribe: openedDocument.subscribe };
 let loadRequest = 0;
 const remoteMissingMessage = 'Заметка не найдена на Диске. Сохранение и обновление формата по этому адресу заблокированы.';
+
+function describeCloudLoadFailure(reason: CloudUnavailableReason): string {
+  switch (reason) {
+    case 'auth': return 'Ошибка авторизации запроса к API Диска.';
+    case 'network': return 'Не удалось соединиться с Диском.';
+    case 'remote': return 'Диск вернул ошибку при загрузке заметки.';
+    case 'invalid-response': return 'Получен некорректный ответ Диска.';
+  }
+}
 
 function describeFormatProblem(reason: string): string {
   switch (reason) {
@@ -70,6 +81,7 @@ export function resetCardDocument(): void {
   cardStore.set(null);
   cardLoading.set(false);
   cardLoadSource.set(null);
+  cardLoadWarning.set(null);
   cardSaveError.set(null);
   cardSaveMessage.set(null);
 }
@@ -143,6 +155,7 @@ export async function loadCard(filename: string) {
   cardLoading.set(true);
   cardDeliveryStatus.set('idle');
   cardLoadSource.set(null);
+  cardLoadWarning.set(null);
   cardSaveError.set(null);
   cardSaveMessage.set(null);
   cardStore.set(null);
@@ -154,6 +167,9 @@ export async function loadCard(filename: string) {
     const loaded = await (await getCardSync()).load(`${filename}.md`, { checkIsCurrent: () => request === loadRequest });
     if (request !== loadRequest) return;
     if ('source' in loaded) {
+      if (loaded.loadFailure) {
+        cardLoadWarning.set(`${describeCloudLoadFailure(loaded.loadFailure)} Показана локальная копия; её актуальность на Диске не проверена.`);
+      }
       if (loaded.saveId || loaded.status === 'legacy') cardDeliveryStatus.set(loaded.status);
       const result = parseMarkdownDocument(loaded.source);
       setLoadedDocument({ status: 'loaded', filename, result, migrationError: null,
@@ -170,6 +186,7 @@ export async function loadCard(filename: string) {
     }
     const message = loaded.status === 'not-found' ? remoteMissingMessage
       : loaded.status === 'storage-error' ? `Не удалось загрузить заметку: ${loaded.detail ?? 'ошибка локального хранилища'}.`
+      : loaded.loadFailure ? `${describeCloudLoadFailure(loaded.loadFailure)} Локальная копия отсутствует. Повторите загрузку позже.`
       : 'Исходный Markdown недоступен. Загрузите заметку с Диска перед редактированием.';
     if (loaded.status === 'storage-error') {
       openedDocument.set({ status: 'unavailable', filename, message });
@@ -229,6 +246,7 @@ async function saveOpenedCard(document: OpenedCardDocument, filename: string, ca
       || currentDraft.markdown !== draftBeforeSave.markdown;
     if (!hasUnsubmittedEdits) cardStore.set(structuredClone(snapshot.document.card));
     const synced = result.status === 'synced';
+    if (synced) cardLoadWarning.set(null);
     openedDocument.set({ ...document, result: snapshot,
       saveMode: synced ? 'update' : document.saveMode,
       editBase: synced ? { base: { kind: 'present', revision: null }, baseSource: snapshot.document.source,
@@ -277,6 +295,7 @@ export async function refreshCurrentSyncStatus(): Promise<void> {
   if (get(openedDocument) !== document) return;
   cardDeliveryStatus.set(result.status);
   if (result.status === 'synced') {
+    cardLoadWarning.set(null);
     openedDocument.set({ ...document, saveMode: 'update',
       editBase: { ...document.editBase, base: { kind: 'present', revision: null }, baseSource: getCardDocumentSource(document) } });
     const current = get(cardStore);

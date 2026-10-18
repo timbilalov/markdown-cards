@@ -189,6 +189,13 @@ describe('GET /api/cloud/download: safe failures distinct from a missing file', 
     expect(http.fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('reports a listed file whose download fails with HTTP 500 as a remote error without exposing provider diagnostics', async () => {
+    serve(v1);
+    http.on('GET', href, () => new Response('file IO failure: no successful lookup result', { status: 500 }));
+    await expectError(await resolveDownload(event(query())), 502, 'CLOUD_REMOTE_ERROR');
+    expect(http.fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('reports a network failure without raw diagnostics and can recover on the next request', async () => {
     http.on('GET', apiUrl(), () => { throw new Error(`Network details ${token} ${root}`); });
     await expectError(await resolveDownload(event(query())), 503, 'CLOUD_UNAVAILABLE');

@@ -236,7 +236,7 @@ describe('YandexDiskAdapter.read: download URL and redirect boundaries', () => {
 
 describe('YandexDiskAdapter.read: download errors never become missing or partial documents', () => {
   it.each([
-    [401, 'auth'], [403, 'auth'], [404, 'remote'], [503, 'remote'], [204, 'remote'], [206, 'remote']
+    [401, 'auth'], [403, 'auth'], [404, 'remote'], [500, 'remote'], [503, 'remote'], [204, 'remote'], [206, 'remote']
   ] as const)('maps download HTTP %i to %s', async (status, reason) => {
     http.on('GET', apiUrl(), () => Response.json(link()));
     http.on('GET', downloadUrl, () => new Response(null, { status }));
