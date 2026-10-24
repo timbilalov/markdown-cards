@@ -62,6 +62,19 @@ describe('explicit legacy to v1 migration', () => {
     expectMigrated(legacy, migrated, card);
   });
 
+  it('preserves horizontal rules and surrounding description text without losing card fields', () => {
+    const description = card.description.replace('\n\n', '\n\n---\n\n');
+    const source = legacy.replace(card.description, description);
+    const markdown = migrated.replace(card.description, description);
+    const expectedCard = { ...card, description };
+
+    expectMigrated(source, markdown, expectedCard);
+    expect(migrateMarkdownDocument(markdown)).toEqual({
+      status: 'success', source: markdown,
+      document: { version: 1, source: markdown, card: expectedCard }, appliedSteps: []
+    });
+  });
+
   it('migrates minimal data without inventing optional fields', () => {
     expectMigrated(minimalLegacy, minimalV1, minimalCard);
   });

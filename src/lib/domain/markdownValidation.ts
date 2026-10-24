@@ -70,7 +70,8 @@ function checkIsSupportedInlineText(text: string): boolean {
 
 function checkIsSupportedDescription(text: string): boolean {
   return checkHasAllowedTextCharacters(text) && Lexer.lex(text, { gfm: true }).every(token =>
-    token.type === 'space' || (token.type === 'paragraph' && checkAreAllInlineTokensSupported(token.tokens ?? [])));
+    token.type === 'space' || token.type === 'hr'
+    || (token.type === 'paragraph' && checkAreAllInlineTokensSupported(token.tokens ?? [])));
 }
 
 // Build a typed snapshot only after every field has been checked. Unknown keys
