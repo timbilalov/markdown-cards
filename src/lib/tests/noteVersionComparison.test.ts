@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { compareNoteVersions } from '../domain/storageSync';
 import type { NoteCopy } from '../domain/storageSync';
+import legacyCard from './fixtures/migration-legacy.md?raw';
+import migratedCard from './fixtures/migration-v1.md?raw';
 import {
   OLDER,
   NEWER,
@@ -71,6 +73,36 @@ describe('compareNoteVersions: exact sources and document Modified', () => {
         group(NEW_SOURCE, ['local', 'another-cloud'], NEWER)
       ],
       freshness: { status: 'latest', storageIds: ['local', 'another-cloud'] }
+    });
+  });
+
+  it('ranks a newer migrated Dropbox copy above its legacy original without changing either source', () => {
+    const legacy = legacyCard.replaceAll('\n', '\r\n');
+    const saved = migratedCard.replace('2026-09-24T00:00:00.000Z', '2026-09-25T00:00:00.000Z');
+    const copies: readonly NoteCopy[] = Object.freeze([
+      Object.freeze(present('disk', legacy, null, NEWEST)),
+      Object.freeze(present('dropbox', saved, 'saved-revision', NEWER))
+    ]);
+
+    expect(compareNoteVersions(copies)).toEqual({
+      versions: [group(legacy, ['disk'], OLDER), group(saved, ['dropbox'], NEWER)],
+      freshness: { status: 'latest', storageIds: ['dropbox'] }
+    });
+  });
+
+  it('can identify a legacy copy as newer than a supported v1 copy', () => {
+    const legacy = legacyCard.replace('2026-09-24', '2026-09-26');
+
+    expect(compareNoteVersions([present('disk', legacy), present('dropbox', migratedCard)])).toEqual({
+      versions: [group(legacy, ['disk'], NEWEST), group(migratedCard, ['dropbox'], OLDER)],
+      freshness: { status: 'latest', storageIds: ['disk'] }
+    });
+  });
+
+  it('keeps legacy and migrated sources distinct when their Modified timestamps match', () => {
+    expect(compareNoteVersions([present('disk', legacyCard), present('dropbox', migratedCard)])).toEqual({
+      versions: [group(legacyCard, ['disk'], OLDER), group(migratedCard, ['dropbox'], OLDER)],
+      freshness: { status: 'undetermined', reason: 'same-modified' }
     });
   });
 
@@ -162,7 +194,9 @@ describe('compareNoteVersions: exact sources and document Modified', () => {
   });
 
   it.each([
-    ['legacy', LEGACY_SOURCE],
+    ['unmigratable legacy', LEGACY_SOURCE],
+    ['legacy with an invalid timestamp', legacyCard.replace('2026-09-24', '2026-02-30')],
+    ['legacy with unsupported metadata', legacyCard + '\n### External revision\n\nKEEP\n'],
     ['future format', FUTURE_SOURCE],
     ['invalid timestamp', INVALID_TIME_SOURCE],
     ['unsupported metadata', UNKNOWN_METADATA_SOURCE]

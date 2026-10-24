@@ -1,4 +1,4 @@
-import { parseMarkdownDocument } from './markdown';
+import { migrateMarkdownDocument } from './markdownMigration';
 import { checkIsMarkdownFilename } from './markdownFilename';
 
 // Storage IDs identify configured instances, not provider types. Callers supply
@@ -32,7 +32,7 @@ export type NoteCopy =
 export interface NoteVersionGroup {
   source: string;
   storageIds: string[];
-  // Modified from a fully supported v1 document, never the provider date.
+  // Modified from validated v1 or a checked legacy migration, never the provider date.
   modifiedAt: number | null;
 }
 
@@ -111,11 +111,12 @@ export function compareNoteVersions(copies: readonly NoteCopy[]): NoteComparison
     if (copy.status !== 'present') continue;
     let group = groups.get(copy.source);
     if (!group) {
-      const parsed = parseMarkdownDocument(copy.source);
+      // Migration only supplies the date; retain the original text for comparison and copying.
+      const migrated = migrateMarkdownDocument(copy.source);
       group = {
         source: copy.source,
         storageIds: [],
-        modifiedAt: parsed.status === 'success' ? parsed.document.card.meta.modified : null
+        modifiedAt: migrated.status === 'success' ? migrated.document.card.meta.modified : null
       };
       groups.set(copy.source, group);
     }
