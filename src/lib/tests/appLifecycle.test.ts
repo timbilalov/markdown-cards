@@ -1,3 +1,5 @@
+import { mockHttp } from './helpers/http';
+import { mockStorageCatalog } from './helpers/browserStorageContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), refresh: vi.fn(), subscribe: vi.fn(), unsubscribe: vi.fn(), auth: vi.fn() }));
 vi.mock('../services/cardSyncRuntime', () => ({ startCardSyncWorker: mocks.start, subscribeSync: mocks.subscribe }));
@@ -13,7 +15,7 @@ vi.mock('../stores/cloudStore', async () => {
 });
 vi.mock('../services/cacheManager', () => ({ cacheManager: { validateCache: vi.fn() } }));
 beforeEach(() => {
-  vi.resetModules(); vi.clearAllMocks();
+  vi.resetModules(); vi.clearAllMocks(); mockStorageCatalog(mockHttp());
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
   mocks.start.mockReturnValue(mocks.stop); mocks.subscribe.mockReturnValue(mocks.unsubscribe); mocks.auth.mockResolvedValue(true);
 });

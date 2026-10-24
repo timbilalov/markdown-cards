@@ -1,3 +1,4 @@
+import { yandexEnvironment, configuredCloudLocals } from './helpers/configuredCloud';
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockHttp } from './helpers/http';
@@ -9,7 +10,7 @@ const token = 'private-upload-test-token';
 const root = 'notes/Мои карточки';
 const filename = 'Заметка #1 & планы?.md';
 const href = 'https://uploader1d.dst.yandex.net/upload-target/test?signature=test-only';
-const settings = { CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: token, YANDEX_DISK_BASE_PATH: root };
+const settings = { ...yandexEnvironment(token, root) };
 let http: ReturnType<typeof mockHttp>;
 let openDatabase: ReturnType<typeof vi.spyOn>;
 
@@ -27,7 +28,7 @@ async function send(overwrite: string | null = 'true', source = inputSource, pat
   if (overwrite !== null) form.set('overwrite', overwrite);
   const request = new Request('https://app.example.invalid/api/cloud/upload', { method: 'POST', body: form });
   const { POST } = await import('../../routes/api/cloud/upload/+server');
-  return POST({ request, url: new URL(request.url), params: {}, locals: {}, route: { id: '/api/cloud/upload' } } as unknown as Parameters<typeof POST>[0]);
+  return POST({ request, url: new URL(request.url), params: {}, locals: configuredCloudLocals(environment.values), route: { id: '/api/cloud/upload' } } as unknown as Parameters<typeof POST>[0]);
 }
 async function expectError(response: Response, status: number, error: string, outcome?: 'not-written' | 'unknown') {
   expect(response.status).toBe(status);
@@ -60,7 +61,7 @@ describe('POST /api/cloud/upload through private composition and the real adapte
   it('reads private configuration on each request', async () => {
     serve();
     expect((await send()).status).toBe(200);
-    environment.values = { ...settings, YANDEX_DISK_TOKEN: 'next-private-test-token', YANDEX_DISK_BASE_PATH: 'next-root' };
+    environment.values = { ...settings, ...yandexEnvironment('next-private-test-token', 'next-root') };
     serve(true, 201, 'next-root');
     expect((await send()).status).toBe(200);
     expect(http.fetch.mock.calls[2]).toEqual([apiUrl(true, 'next-root'), {
@@ -69,7 +70,7 @@ describe('POST /api/cloud/upload through private composition and the real adapte
     expect(http.fetch).toHaveBeenCalledTimes(4);
   });
 
-  it.each(['CLOUD_STORAGE_PROVIDER', 'YANDEX_DISK_TOKEN', 'YANDEX_DISK_BASE_PATH'])('refuses missing %s despite a configured legacy token', async key => {
+  it.each(['CLOUD_STORAGES', 'CLOUD_STORAGE_ACTIVE'])('refuses missing %s despite a configured legacy token', async key => {
     environment.values = { ...settings, [key]: undefined };
     vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'legacy-upload-test-token');
     // Let legacy upload succeed so RED exposes the actual configuration bypass.
@@ -80,7 +81,7 @@ describe('POST /api/cloud/upload through private composition and the real adapte
     expect(http.fetch).not.toHaveBeenCalled();
   });
 
-  it.each([['provider', { CLOUD_STORAGE_PROVIDER: 'unknown' }], ['root', { YANDEX_DISK_BASE_PATH: '../outside' }]] as const)('safely rejects invalid %s configuration', async (_name, change) => {
+  it.each([['provider', yandexEnvironment(token, root, { provider: 'unknown' })], ['root', yandexEnvironment(token, '../outside')]] as const)('safely rejects invalid %s configuration', async (_name, change) => {
     environment.values = { ...settings, ...change };
     await expectError(await send(), 503, 'CLOUD_NOT_CONFIGURED', 'not-written');
     expect(http.fetch).not.toHaveBeenCalled();

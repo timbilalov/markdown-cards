@@ -15,7 +15,7 @@ it('retains every old queue status and Card when upgrading v2 and running the ac
   await seedLegacyDatabase();
   await (await import('../services/cardSyncRuntime')).retryCardSync(true);
   const upgraded = await readLegacyDatabase();
-  expect(upgraded.version).toBe(5);
+  expect(upgraded.version).toBe(6);
   expect(upgraded.records).toEqual({ ...legacyRecords, syncQueue: [...legacyRecords.syncQueue].sort((a, b) => a.id.localeCompare(b.id)) });
   expect(http.fetch).not.toHaveBeenCalled();
 });

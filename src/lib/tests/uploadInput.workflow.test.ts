@@ -1,3 +1,4 @@
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 // @vitest-environment node
 import { onCloudUpload, uploadLinkCalls } from './helpers/cloudUploadHttp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +10,7 @@ import { ambiguousUploadFields, existingFilename, initialUploadRemote, newFilena
   unicodeFilename, unsafeUploadNames, uploadFields, uploadForm,
   uploadInputRequest, type UploadField } from './helpers/uploadInputFixtures';
 
-vi.mock('$env/dynamic/private', () => ({ env: { CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: 'test-only-token', YANDEX_DISK_BASE_PATH: 'md-cards', SESSION_SECRET: 'aa'.repeat(32) } }));
+vi.mock('$env/dynamic/private', () => ({ env: { CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'test-only-token', rootPath: 'md-cards' }]), SESSION_SECRET: 'aa'.repeat(32) } }));
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 let handle: typeof import('../../hooks.server')['handle'];
@@ -47,7 +48,7 @@ async function send(fields: readonly UploadField[]) {
   }
   const cookieValues = new Map([['auth_token', sessions.issueSession('test-user').token]]);
   const cookies = { get: (name: string) => cookieValues.get(name), set: vi.fn(), delete: vi.fn() };
-  const request = uploadInputRequest(fields);
+  const request = uploadInputRequest(fields); request.headers.set('X-Storage-Context',fixtureStorageContext('md-cards'));
   const event = { request, url: new URL(request.url), cookies, locals: {}, params: {},
     route: { id: '/api/cloud/upload' }, getClientAddress: () => '127.0.0.1' } as unknown as RequestEvent;
   const response = await runHandle(handle, { event, resolve: current => Promise.resolve(upload(current)) });
@@ -64,7 +65,7 @@ async function expectRefusal(fields: readonly UploadField[], error: string) {
   expect(response.headers.get('Location')).toBeNull();
   expect(await response.json()).toEqual({ success: false, error });
   expect(parseMarkdown).not.toHaveBeenCalled();
-  expect(http.fetch).not.toHaveBeenCalled();
+  expect(fileRequests(http)).toEqual([]);
   expect(writes).toEqual([]);
   expect(Object.fromEntries(remote)).toEqual(initialUploadRemote);
 }
@@ -77,10 +78,10 @@ async function expectValidRetry(filename = unicodeFilename, overwrite: string | 
   expect(parseMarkdown).toHaveBeenCalledExactlyOnceWith(inputSource);
   expect(writes).toEqual([{ path: `md-cards/${filename}`, source: inputSource, overwrite: overwrite === 'true' }]);
   expect(Object.fromEntries(remote)).toEqual({ ...initialUploadRemote, [`md-cards/${filename}`]: inputSource });
-  expect(http.fetch).toHaveBeenCalledTimes(2);
+  expect(fileRequests(http)).toHaveLength(2);
   expect(uploadLinkCalls(
     `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(`md-cards/${filename}`)}&overwrite=${overwrite === 'true'}`,
-    'test-only-token')).toContainEqual(http.fetch.mock.calls[0]);
+    'test-only-token')).toContainEqual(fileRequests(http)[0]);
 }
 
 beforeEach(async () => {
@@ -90,7 +91,7 @@ beforeEach(async () => {
   vi.setSystemTime(1790812800000);
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'test-only-token');
-  http = mockHttp();
+  http = mockHttp(); mockStorageIdentity(http, 'md-cards');
   remote = new Map(Object.entries(initialUploadRemote));
   writes = [];
   parseMarkdown = vi.spyOn(await import('../domain/markdown'), 'parseMarkdownDocument');

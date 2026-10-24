@@ -1,8 +1,8 @@
+import { unavailableResponses } from '$lib/server/cloud/cloudErrorResponses';
 import { json } from '@sveltejs/kit';
 import { parseMarkdownDocument } from '$lib/domain/markdown';
 import { checkIsMarkdownFilename } from '$lib/domain/markdownFilename';
-import type { CloudStoragePort, CloudUnavailableReason, CloudWriteResult } from '$lib/ports/cloudStorage';
-import { createServerCloudStorage } from '$lib/server/cloud/serverCloudStorage';
+import type { CloudWriteResult } from '$lib/ports/cloudStorage';
 import { readRequestBody } from '$lib/server/requestBody';
 import type { RequestHandler } from './$types';
 
@@ -13,12 +13,6 @@ const bodyErrors = {
   invalid: { status: 400, error: 'INVALID_REQUEST_BODY' }
 };
 const allowedFields = new Set(['path', 'content', 'overwrite']);
-const unavailableResponses: Record<CloudUnavailableReason, { status: number; error: string }> = {
-  auth: { status: 502, error: 'CLOUD_AUTH_FAILED' },
-  network: { status: 503, error: 'CLOUD_UNAVAILABLE' },
-  remote: { status: 502, error: 'CLOUD_REMOTE_ERROR' },
-  'invalid-response': { status: 502, error: 'CLOUD_INVALID_RESPONSE' }
-};
 
 function checkHasValidUploadFields(formData: FormData): boolean {
   const seen = new Set<string>();
@@ -39,7 +33,11 @@ function createErrorResponse(error: string, status: number, outcome?: 'not-writt
   return json({ success: false, error, ...(outcome ? { outcome } : {}) }, { status, headers });
 }
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+  const expectedRevision = request.headers.get('X-Expected-Revision');
+  if (expectedRevision !== null && (!expectedRevision.trim() || /[\u0000-\u001f\u007f]/.test(expectedRevision))) {
+    return createInvalidInputResponse('CLOUD_INVALID_WRITE_REQUEST');
+  }
   const bodyResult = await readRequestBody(request, 'multipart');
   if (bodyResult.status !== 'success') {
     const { status, error } = bodyErrors[bodyResult.status];
@@ -84,24 +82,24 @@ export const POST: RequestHandler = async ({ request }) => {
     }, { status: isUnsupported ? 422 : 400, headers });
   }
 
-  let storage: CloudStoragePort;
-  try {
-    storage = createServerCloudStorage();
-  } catch {
+  const storage = locals.cloudStorage;
+  if (!storage) {
     return createErrorResponse('CLOUD_NOT_CONFIGURED', 503, 'not-written');
   }
 
   let result: CloudWriteResult;
   try {
     // Preserve the received source and destination; only translate the HTTP flag.
-    result = await storage.write({ path: filePath, source: fileContent, createOnly: !overwrite });
+    result = await storage.write({ path: filePath, source: fileContent, createOnly: !overwrite,
+      ...(expectedRevision === null ? {} : { expectedRevision }) });
   } catch {
     // An unexpected failure after starting the write cannot prove it was not applied.
     return createErrorResponse('CLOUD_WRITE_UNKNOWN', 503, 'unknown');
   }
   switch (result.status) {
     case 'written':
-      return new Response('File uploaded successfully', { status: 200, headers });
+      return new Response('File uploaded successfully', { status: 200, headers: { ...headers,
+        ...(result.revision === null ? {} : { 'X-Cloud-Revision': result.revision }) } });
     case 'conflict':
       return createErrorResponse('CLOUD_CONFLICT', 409);
     case 'unsupported':

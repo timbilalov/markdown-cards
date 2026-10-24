@@ -1,3 +1,4 @@
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 import { installWebLocks } from './helpers/webLocks';
 import { readUploadContent } from './helpers/uploadContent';
 // @vitest-environment node
@@ -15,8 +16,7 @@ import {
 
 vi.mock('$app/environment', () => ({ browser: true }));
 vi.mock('$env/dynamic/private', () => ({ env: {
-  SESSION_SECRET: 'ab'.repeat(32), CLOUD_STORAGE_PROVIDER: 'yandex',
-  YANDEX_DISK_TOKEN: 'response-private-test-token', YANDEX_DISK_BASE_PATH: 'response-notes'
+  SESSION_SECRET: 'ab'.repeat(32), CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'response-private-test-token', rootPath: 'response-notes' }])
 } }));
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 const origin = 'https://app.example.invalid';
@@ -28,7 +28,7 @@ beforeEach(() => {
   vi.setSystemTime(Date.parse('2026-10-02T12:00:00Z'));
   vi.stubGlobal('window', new EventTarget());
   vi.stubGlobal('navigator', { onLine: true });
-  installWebLocks(); http = mockHttp({ authenticated: true });
+  installWebLocks(); http = mockHttp({ authenticated: true }); mockStorageIdentity(http, 'response-notes');
 });
 afterEach(() => { http.assertHandled(); });
 
@@ -36,7 +36,8 @@ async function invokeRoute(path: string, handler: RequestHandler, init?: Request
   const { handle } = await import('../../hooks.server');
   const { issueSession } = await import('../server/session');
   const token = issueSession('test-user').token;
-  const request = new Request(`${origin}${path}`, init);
+  const headers=new Headers(init?.headers); headers.set('X-Storage-Context',fixtureStorageContext('response-notes'));
+  const request = new Request(`${origin}${path}`, {...init,headers});
   const event = { request, url: new URL(request.url), params: {}, locals: {},
     route: { id: path.split('?')[0] },
     cookies: { get: (name: string) => name === 'auth_token' ? token : undefined, set: vi.fn() },
@@ -139,7 +140,7 @@ describe('Save keeps a durable local snapshot when the provider upload-link body
       saveMode: kind === 'new' ? 'create' : 'update', source: localSource });
     expect(remote).toBe(kind === 'new' ? null : legacy);
     expect(get(cards.cardSaveMessage)).toBeNull();
-    expect(get(cards.cardSaveError)).toMatch(/локально.*не на Диске/i);
+    expect(get(cards.cardSaveError)).toMatch(/локально.*не в облаке/i);
     expect(http.fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
 
     oversized = false;

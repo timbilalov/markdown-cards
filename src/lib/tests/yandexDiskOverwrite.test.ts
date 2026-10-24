@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createCloudStorage } from '../server/cloud/cloudStorageFactory';
+import { YandexDiskAdapter } from '../server/cloud/yandexDiskAdapter';
 import type { CloudWriteRequest, CloudStoragePort } from '../ports/cloudStorage';
 import { mockHttp } from './helpers/http';
 import v1 from './fixtures/v1-card.md?raw';
@@ -16,14 +16,14 @@ let storage: CloudStoragePort;
 
 beforeEach(() => {
   http = mockHttp();
-  storage = createCloudStorage({ provider: 'yandex', yandex: { accessToken: token, rootPath: root } });
+  storage = new YandexDiskAdapter({ accessToken: token, rootPath: root });
 });
 afterEach(() => http.assertHandled());
 
 function request(source = v1): CloudWriteRequest { return { path, source }; }
 function registerLink() { http.on('GET', apiUrl, () => Response.json(link)); }
 
-describe('explicit ordinary overwrite through the provider-neutral factory', () => {
+describe('explicit ordinary overwrite through the Yandex adapter', () => {
   it.each([v1, '', '\uFEFF# Текст 🗂\r\n\tстрока  \r\n'])('sends exact UTF-8 source %# without read, OAuth on PUT, or invented revision', async source => {
     registerLink();
     http.on('PUT', href, () => new Response(null, { status: 201, headers: { ETag: 'not-a-verified-revision' } }));

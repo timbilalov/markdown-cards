@@ -34,7 +34,7 @@ beforeEach(async () => {
 });
 afterEach(() => http.assertHandled());
 
-describe('CloudService.listFiles: same-origin browser transport', () => {
+describe('cloudService.listFiles: same-origin browser transport', () => {
   it.each([null, 'legacy-test-token'])('reads validated metadata without persistent listing copies with browser token %j', async token => {
     setLegacyClientToken(service, token);
     const body = { _embedded: { items: [known, unknown] } };
@@ -80,7 +80,7 @@ describe('CloudService.listFiles: same-origin browser transport', () => {
     const result = await outcome();
 
     expectApiRequest();
-    expect(result).toEqual({ _embedded: { items: [known] } });
+    expect(result).toEqual({ _embedded: { items: [{...known,revision:'unverified'}] } });
     expect(await historicalStorage.getAllCloudFiles()).toEqual([]);
   });
 
@@ -98,7 +98,7 @@ describe('CloudService.listFiles: same-origin browser transport', () => {
   });
 });
 
-describe('CloudService.listFiles: explicit errors, no retries or false empty success', () => {
+describe('cloudService.listFiles: explicit errors, no retries or false empty success', () => {
   it.each([
     [401, 'AUTH_FAILED'], [403, 'AUTH_FAILED'], [404, 'HTTP_404'],
     [502, 'HTTP_502'], [503, 'HTTP_503']

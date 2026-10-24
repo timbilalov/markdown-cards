@@ -1,3 +1,4 @@
+import { yandexEnvironment, configuredCloudLocals } from './helpers/configuredCloud';
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestEvent } from '@sveltejs/kit';
@@ -13,11 +14,7 @@ vi.mock('$env/dynamic/private', () => ({ get env() { return privateEnvironment.v
 
 const token = 'route-private-test-token';
 const root = 'notes/Мои карточки';
-const settings = {
-  CLOUD_STORAGE_PROVIDER: 'yandex',
-  YANDEX_DISK_TOKEN: token,
-  YANDEX_DISK_BASE_PATH: root
-};
+const settings = { ...yandexEnvironment(token, root) };
 let http: ReturnType<typeof mockHttp>;
 let openDatabase: ReturnType<typeof vi.spyOn>;
 
@@ -44,7 +41,7 @@ async function getFiles(query = ''): Promise<Response> {
   const { GET } = await import('../../routes/api/cloud/files/+server');
   const request = new Request(`https://app.example.invalid/api/cloud/files${query}`);
   const event = {
-    request, url: new URL(request.url), params: {}, locals: {},
+    request, url: new URL(request.url), params: {}, locals: configuredCloudLocals(privateEnvironment.values),
     getClientAddress: () => '127.0.0.1'
   } as unknown as RequestEvent;
   return GET({ ...event, params: {}, route: { id: '/api/cloud/files' } });
@@ -136,7 +133,7 @@ describe('GET /api/cloud/files: private server configuration and complete compat
 
     await expectResponse(await getFiles(), 200, ['first.md']);
     privateEnvironment.values = {
-      ...settings, YANDEX_DISK_TOKEN: secondToken, YANDEX_DISK_BASE_PATH: secondRoot
+      ...settings, ...yandexEnvironment(secondToken, secondRoot)
     };
     await expectResponse(await getFiles(), 200, ['second.md']);
     expectListRequest();
@@ -184,11 +181,11 @@ describe('GET /api/cloud/files: private server configuration and complete compat
 
 describe('GET /api/cloud/files: explicit unavailable results, never false empty success', () => {
   it.each([
-    ['missing provider', { ...settings, CLOUD_STORAGE_PROVIDER: undefined }],
-    ['missing token', { ...settings, YANDEX_DISK_TOKEN: undefined }],
-    ['missing root', { ...settings, YANDEX_DISK_BASE_PATH: undefined }],
-    ['unknown provider', { ...settings, CLOUD_STORAGE_PROVIDER: 'memory' }],
-    ['unsafe root', { ...settings, YANDEX_DISK_BASE_PATH: 'notes/../outside' }]
+    ['missing connections', { ...settings, CLOUD_STORAGES: undefined }],
+    ['missing token', yandexEnvironment('', root)],
+    ['missing root', yandexEnvironment(token, '')],
+    ['unknown provider', yandexEnvironment(token, root, { provider: 'memory' })],
+    ['unsafe root', yandexEnvironment(token, 'notes/../outside')]
   ])('reports %s as a configuration error before HTTP', async (_name, values) => {
     privateEnvironment.values = values;
 
@@ -197,7 +194,7 @@ describe('GET /api/cloud/files: explicit unavailable results, never false empty 
   });
 
   it('refuses missing private credentials even when the old public token could list files', async () => {
-    privateEnvironment.values = { ...settings, YANDEX_DISK_TOKEN: undefined };
+    privateEnvironment.values = yandexEnvironment('', root);
     vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'legacy-public-test-token');
     // Let the working legacy path succeed. RED must be a response assertion,
     // not an unexpected HTTP request or a retry timeout.

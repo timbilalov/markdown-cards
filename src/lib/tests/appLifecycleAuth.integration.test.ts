@@ -1,3 +1,4 @@
+import { initializeTestStorage, browserStorageDescriptor } from './helpers/browserStorageContext';
 import { historicalStorage } from './helpers/historicalStorage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
@@ -39,6 +40,7 @@ beforeEach(async () => {
   http.on('GET', '/api/cloud/files', () => authenticated
     ? Response.json({ _embedded: { items: [] } })
     : Response.json({ error: 'Not authenticated' }, { status: 401 }));
+  await initializeTestStorage(http);
   db = (await import('../services/dbService')).dbService;
   cloud = await import('../stores/cloudStore');
   lifecycle = await import('../services/appLifecycle');
@@ -139,8 +141,9 @@ describe('background cloud work follows the authenticated session', () => {
     expect(cloudRequests()).toEqual([]);
     authenticated = true;
     expect(await cloud.checkIsSessionAuthenticated()).toBe(true);
+    await drainIndexedDb(); // Login verifies/binds the destination before timers start.
     await advance(5100);
-    expect(cloudRequests()).toEqual([['/api/cloud/files', { method: 'GET', signal: expect.any(AbortSignal) }]]);
+    expect(cloudRequests()).toEqual([['/api/cloud/files', { method: 'GET', signal: expect.any(AbortSignal), headers: {'X-Storage-Context':browserStorageDescriptor.contextId} }]]);
     stop?.(); stop = undefined;
     http.fetch.mockClear();
     await cloud.logout();

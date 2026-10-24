@@ -1,13 +1,14 @@
 import { MIMEType } from 'node:util';
 import { isUtf8 } from 'node:buffer';
 
-type RequestBodyFormat = 'json' | 'multipart';
+type RequestBodyFormat = 'json' | 'multipart' | 'markdown';
 type RequestBodyResult =
   | { status: 'success'; response: Response }
   | { status: 'unsupported-media-type' | 'too-large' | 'invalid' };
 
 const bodyLimits: Record<RequestBodyFormat, number> = {
   json: 16 * 1024,
+  markdown: 1024 * 1024,
   multipart: 1024 * 1024
 };
 
@@ -20,6 +21,9 @@ function parseContentType(request: Request, format: RequestBodyFormat): MIMEType
     if (format === 'json') {
       const charset = type.params.get('charset');
       if (type.essence !== 'application/json' || (charset !== null && charset.toLowerCase() !== 'utf-8')) return null;
+    } else if (format === 'markdown') {
+      const charset = type.params.get('charset');
+      if (type.essence !== 'text/markdown' || (charset !== null && charset.toLowerCase() !== 'utf-8')) return null;
     } else if (type.essence !== 'multipart/form-data') {
       return null;
     }
@@ -64,7 +68,7 @@ export async function readRequestBody(request: Request, format: RequestBodyForma
     // Upload accepts UTF-8 text, including the exact-byte Markdown file part.
     // Validate the original bounded bytes
     // before native FormData decoding can repair them into a different value.
-    if (format === 'multipart' && !isUtf8(body)) return { status: 'invalid' };
+    if (format !== 'json' && !isUtf8(body)) return { status: 'invalid' };
 
     return {
       status: 'success',

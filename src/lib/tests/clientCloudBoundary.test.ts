@@ -6,17 +6,14 @@ describe('browser cloud security boundary', () => {
   it('does not expose provider credentials, configuration or direct upload methods', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'synthetic-client-secret');
-    const { CloudService, cloudService } = await import('../services/cloudService');
+    const { cloudService } = await import('../services/cloudService');
     const forbidden = [
       'accessToken', 'API_BASE', 'basePath', 'setAccessToken', 'setBasePath',
       'getHeaders', 'getUploadUrl', 'uploadFile', 'uploadFileAtPath', 'checkIsAuthenticated'
     ];
-    for (const service of [cloudService, new CloudService()]) {
-      expect(forbidden.filter(name => name in service), 'No provider capabilities in the browser service').toEqual([]);
-      expect(JSON.stringify(service)).not.toContain('synthetic-client-secret');
-      expect(service.listFiles).toBeTypeOf('function');
-
-    }
+    expect(forbidden.filter(name => name in cloudService), 'No provider capabilities in the browser service').toEqual([]);
+    expect(JSON.stringify(cloudService)).not.toContain('synthetic-client-secret');
+    expect(cloudService.listFiles).toBeTypeOf('function');
   });
 
   it('has no public-token gates or provider transport in browser-eligible sources, including unused diagnostics', async () => {

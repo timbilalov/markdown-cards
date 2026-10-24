@@ -84,10 +84,18 @@ async function migrate(page: Page) {
 async function effects() {
   return (await server.request({ url: `${origin}/api/auth/status` })).effects;
 }
-async function state(page: Page) {
-  return page.evaluate(async () => {
+async function state(page: Page, legacy = false) {
+  return page.evaluate(async legacy => {
+    let name='MarkdownCardsDB';
+    if(!legacy){
+      const manifest=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('MarkdownCardsContexts');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+      try{
+        const context=await new Promise<unknown>((resolve,reject)=>{const tx=manifest.transaction('meta');const request=tx.objectStore('meta').get('active');tx.oncomplete=()=>resolve(request.result);tx.onabort=()=>reject(tx.error);});
+        if(typeof context==='string')name+=`:${context}`;
+      }finally{manifest.close();}
+    }
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('MarkdownCardsDB');
+      const request = indexedDB.open(name);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     try {
@@ -98,7 +106,7 @@ async function state(page: Page) {
         tx.onabort = () => reject(tx.error);
       });
     } finally { db.close(); }
-  });
+  }, legacy);
 }
 async function connectivity(context: BrowserContext, connected: boolean) {
   offline = !connected;
@@ -117,7 +125,7 @@ test('mobile keyboard migration, online Save, offline Save and restart/reconnect
   await migrate(page);
   expect((await effects()).writes).toEqual([]);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('Сохранено на Яндекс Диске.');
+  await expect(page.getByRole('status')).toHaveText(/Сохранено.*Яндекс Диск/);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Обновить формат' })).toHaveCount(0);
   await expect(page.getByLabel('Название заметки')).toHaveValue('Карточка 🗂');
@@ -133,7 +141,7 @@ test('mobile keyboard migration, online Save, offline Save and restart/reconnect
   const restarted = await context.newPage();
   await restarted.goto(`${origin}/card/existing-note`);
   await expect(restarted.getByLabel('Название заметки')).toHaveValue('Offline edit 🗂');
-  await expect(restarted.getByRole('status')).toHaveText('Сохранено на Яндекс Диске.');
+  await expect(restarted.getByRole('status')).toHaveText(/Сохранено.*Яндекс Диск/);
   expect((await effects()).remote[remotePath]).toBe(saved.source);
   expect((await state(restarted)).records.localMarkdownSnapshots).toEqual([]);
   await restarted.getByRole('link', { name: 'Home', exact: true }).click();
@@ -168,7 +176,7 @@ test('lost upload acknowledgement: restart retains exact local/remote Markdown a
   await page.close(); releaseUpload?.(); releaseUpload = undefined;
   const restarted = await context.newPage();
   await restarted.goto(`${origin}/card/existing-note`);
-  await expect(restarted.getByRole('alert')).toContainText('результат записи на Диск неизвестен');
+  await expect(restarted.getByRole('alert')).toContainText('результат записи в облако неизвестен');
   expect((await state(restarted)).records.outbox).toEqual([expect.objectContaining({ state: expect.objectContaining({ status: 'uncertain' }) })]);
   expect((await effects()).remote[remotePath]).toBe(saved.source);
   expect((await state(restarted)).records.localMarkdownSnapshots).toEqual(before.records.localMarkdownSnapshots);
@@ -176,7 +184,7 @@ test('lost upload acknowledgement: restart retains exact local/remote Markdown a
   expect((await effects()).writes).toHaveLength(1);
 });
 
-test('existing Chromium profile upgrades IndexedDB v2 without clearing historical cards, files or queue', async ({ context, page }) => {
+test('does not expose or deliver an unassigned database as a configured storage cache', async ({ context, page }) => {
   // Seed before any application JavaScript opens IndexedDB, in the same real origin/profile.
   await context.addInitScript(async records => {
     if (sessionStorage.getItem('seeded')) return;
@@ -201,9 +209,12 @@ test('existing Chromium profile upgrades IndexedDB v2 without clearing historica
   }, legacyRecords);
   await server.reset({});
   await login(page);
-  await expect(page.getByRole('link', { name: /Карточка/ })).toBeVisible();
-  const upgraded = await state(page);
-  expect(upgraded.version).toBe(5);
+  await expect(page.getByRole('link', { name: /Карточка/ })).toHaveCount(0);
+  await page.goto(`${origin}/storages`);
+  await expect(page.getByRole('columnheader',{name:'Локальный кеш · прежняя база без привязки',exact:true})).toHaveCount(0);
+  const upgraded = await state(page,true);
+  expect(upgraded.version).toBe(6);
+  expect((await state(page)).records.outbox).toEqual([]);
   expect(upgraded.records.cards).toEqual(legacyRecords.cards);
   expect(upgraded.records.files).toEqual(legacyRecords.files);
   expect(upgraded.records.syncQueue).toEqual([...legacyRecords.syncQueue].sort((a, b) => a.id.localeCompare(b.id)));
@@ -224,7 +235,7 @@ test('mobile multi-column board and editor expose named keyboard controls withou
   await first.focus(); await page.keyboard.press('Enter');
   await expect(page.getByLabel('Название заметки')).toHaveValue('Todo note');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('Сохранено на Яндекс Диске.');
+  await expect(page.getByRole('status')).toHaveText(/Сохранено.*Яндекс Диск/);
   await page.getByRole('link', { name: 'Home', exact: true }).click();
   await expect(page.getByRole('link', { name: /Todo note/ })).toBeVisible();
   await expect(page.getByRole('heading', { level: 2 })).toHaveCount(3);
@@ -288,7 +299,7 @@ test('Home after logout redirects to login without exposing or deleting cached c
   await login(page);
   await migrate(page);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('Сохранено на Яндекс Диске.');
+  await expect(page.getByRole('status')).toHaveText(/Сохранено.*Яндекс Диск/);
   await page.getByRole('link', { name: 'Home', exact: true }).click();
   await expect(page.getByRole('link', { name: /Карточка/ })).toBeVisible();
   const cached = (await state(page)).records.cards;

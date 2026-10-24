@@ -1,3 +1,5 @@
+import { getStorageSession } from './storageSession';
+import type { StorageDescriptor } from '../server/cloud/storageRegistry';
 import type { CloudFile, CloudFileListResponse } from '../types/cloud';
 import { expireSession, sessionGeneration } from '../stores/sessionState';
 import { cloudRequestSignal } from '../utils/cloudRequestSignal';
@@ -48,51 +50,62 @@ function parseCloudFileList(value: unknown): CloudFileListResponse | null {
     if (!checkIsRecord(entry) || !checkIsMarkdownFilename(entry.name)
       || entry.path !== entry.name || names.has(entry.name)) return null;
     if ('modified' in entry && !checkIsCanonicalTimestamp(entry.modified)) return null;
+    if ('revision' in entry && (typeof entry.revision!=='string' || !entry.revision.trim() || /[\u0000-\u001f\u007f]/.test(entry.revision))) return null;
     names.add(entry.name);
     items.push({ name: entry.name, path: entry.name,
-      ...(typeof entry.modified === 'string' ? { modified: entry.modified } : {}) });
+      ...(typeof entry.modified === 'string' ? { modified: entry.modified } : {}),
+      ...(typeof entry.revision === 'string' ? { revision: entry.revision } : {}) });
   }
   return { _embedded: { items } };
 }
 
 // Browser read transport. Provider credentials and writes belong to server routes.
-export class CloudService {
-  private async handleResponse<T>(response: Response, generation: number): Promise<T> {
-    if (!response.ok) {
-      if (response.status === 401) expireSession(generation);
-      // Provider auth failures use the server's 502 envelope, whereas the
-      // browser session uses 401/403. Both require credentials, not backoff.
-      const body: unknown = await response.json().catch(() => null);
-      const reason = cloudErrorReason(response.status, checkIsRecord(body) ? body.error : undefined);
-      if (reason === 'auth') {
-        throw new CloudAuthError('Authentication failed');
-      }
-
-      if (reason === 'network') {
-        throw new CloudNetworkError(`Server error: ${response.status}`);
-      }
-
-      if (reason === 'invalid-response') throw new CloudError('Invalid provider response', 'INVALID_RESPONSE');
-
-      throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+async function handleResponse(response: Response, generation: number): Promise<unknown> {
+  if (!response.ok) {
+    if (response.status === 401) expireSession(generation);
+    // Provider auth failures use the server's 502 envelope, whereas the
+    // browser session uses 401/403. Both require credentials, not backoff.
+    const body: unknown = await response.json().catch(() => null);
+    const reason = cloudErrorReason(response.status, checkIsRecord(body) ? body.error : undefined);
+    if (reason === 'auth') {
+      throw new CloudAuthError('Authentication failed');
     }
-    return await response.json();
-  }
 
+    if (reason === 'network') {
+      throw new CloudNetworkError(`Server error: ${response.status}`);
+    }
+
+    if (reason === 'invalid-response')
+      throw new CloudError('Invalid provider response', 'INVALID_RESPONSE');
+
+    throw new CloudError(`HTTP error! status: ${response.status}`, `HTTP_${response.status}`);
+  }
+  return await response.json();
+}
+
+export const cloudService = {
   // Browser listing uses the server session and private storage configuration.
-  async listFiles(signal?: AbortSignal): Promise<CloudFileListResponse> {
+  async listFiles(
+    signal?: AbortSignal,
+    context: StorageDescriptor | undefined = getStorageSession()?.descriptor ?? undefined,
+    baseUrl = '/api/cloud'
+  ): Promise<CloudFileListResponse> {
     const generation = sessionGeneration();
     signal = cloudRequestSignal(signal);
     let response: Response;
     try {
-      response = await fetch('/api/cloud/files', { method: 'GET', signal });
+      response = await fetch(`${baseUrl}/files`, {
+        method: 'GET',
+        signal,
+        ...(context ? { headers: { 'X-Storage-Context': context.contextId } } : {})
+      });
     } catch {
       throw new CloudNetworkError('Failed to fetch cloud file list');
     }
 
     let body: unknown;
     try {
-      body = await this.handleResponse<unknown>(response, generation);
+      body = await handleResponse(response, generation);
     } catch (error) {
       if (error instanceof CloudAuthError) throw error;
       if (signal.aborted) throw new CloudNetworkError('Cloud listing cancelled');
@@ -105,7 +118,4 @@ export class CloudService {
 
     return data;
   }
-
-}
-
-export const cloudService = new CloudService();
+};

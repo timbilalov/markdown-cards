@@ -30,7 +30,7 @@ const operations: OutboxOperation[] = states.map((state, index) => ({
   createOnly: false, base: { kind: 'present', revision: 'opaque-base' },
   createdAt: 100 - index, attempts: index, state
 }));
-const storeNames = ['cards', 'files', 'localMarkdownSnapshots', 'markdownDocuments', 'outbox', 'syncQueue'];
+const storeNames = ['cards', 'files', 'localMarkdownSnapshots', 'manualSyncArchives', 'markdownDocuments', 'outbox', 'syncQueue'];
 
 function openCurrent(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -97,12 +97,12 @@ async function readState() {
 
 const plainStore = (keyPath: string) => ({ keyPath, autoIncrement: false, indexes: {} });
 
-describe('DBService: additive v5 outbox schema', () => {
+describe('DBService: additive v6 schema with retained outbox', () => {
   it('creates all stores on a fresh database and provides a usable outbox', async () => {
     const service = new DBService();
     await service.init();
     const state = await readState();
-    expect(state.version).toBe(5);
+    expect(state.version).toBe(6);
     expect(Object.keys(state.records)).toEqual(storeNames);
     expect(Object.values(state.records)).toEqual(storeNames.map(() => []));
     expect(state.schema.outbox).toEqual(plainStore('id'));
@@ -120,12 +120,12 @@ describe('DBService: additive v5 outbox schema', () => {
     const service = new DBService();
     await service.init();
     const after = await readState();
-    expect(after.version).toBe(5);
+    expect(after.version).toBe(6);
     expect(Object.keys(after.records)).toEqual(storeNames);
     expect(after.records).toEqual({ markdownDocuments: [], localMarkdownSnapshots: [],
-      ...before.records, outbox: [] });
+      ...before.records, outbox: [], manualSyncArchives: [] });
     expect(after.schema).toEqual({ markdownDocuments: plainStore('filename'),
-      localMarkdownSnapshots: plainStore('filename'), ...before.schema, outbox: plainStore('id') });
+      localMarkdownSnapshots: plainStore('filename'), ...before.schema, outbox: plainStore('id'), manualSyncArchives: plainStore('id') });
     expect(await historicalStorage.getPendingSyncOperations())
       .toEqual(legacyRecords.syncQueue.filter(operation => operation.status === 'pending'));
     const connection = await openCurrent();
@@ -145,7 +145,7 @@ describe('DBService: additive v5 outbox schema', () => {
     const before = await readState();
     const service = new DBService();
     await expect(service.init()).resolves.toBeUndefined();
-    expect(await readState()).toEqual(before);
+    expect(await readState()).toEqual({ ...before, version: 6, records: { ...before.records, manualSyncArchives: [] }, schema: { ...before.schema, manualSyncArchives: plainStore('id') } });
     expect(service.getPerformanceMetrics()).toMatchObject({ operations: 1, errors: 0 });
   });
 
@@ -153,7 +153,7 @@ describe('DBService: additive v5 outbox schema', () => {
     await seed(4, true);
     const before = await readState();
     await new DBService().init();
-    expect(await readState()).toEqual({ ...before, version: 5 });
+    expect(await readState()).toEqual({ ...before, version: 6, records: { ...before.records, manualSyncArchives: [] }, schema: { ...before.schema, manualSyncArchives: plainStore('id') } });
   });
 
   it('rolls back an aborted v4 upgrade and permits an explicit retry', async () => {
@@ -174,8 +174,8 @@ describe('DBService: additive v5 outbox schema', () => {
     expect(service.getPerformanceMetrics()).toMatchObject({ operations: 0, errors: 1 });
     service.resetPerformanceMetrics();
     await service.init();
-    expect((await readState()).records).toEqual({ ...before.records, outbox: [] });
-    expect((await readState()).version).toBe(5);
+    expect((await readState()).records).toEqual({ ...before.records, outbox: [], manualSyncArchives: [] });
+    expect((await readState()).version).toBe(6);
     expect(service.getPerformanceMetrics()).toMatchObject({ operations: 1, errors: 0 });
   });
 
@@ -194,8 +194,8 @@ describe('DBService: additive v5 outbox schema', () => {
     expect(service.getPerformanceMetrics()).toMatchObject({ operations: 0, errors: 1 });
     service.resetPerformanceMetrics();
     await service.init();
-    expect((await readState()).version).toBe(5);
-    expect((await readState()).records).toEqual({ ...before.records, outbox: [] });
+    expect((await readState()).version).toBe(6);
+    expect((await readState()).records).toEqual({ ...before.records, outbox: [], manualSyncArchives: [] });
   });
 
   it('reports a blocked upgrade once and prevents the rejected request from upgrading later', async () => {
@@ -224,14 +224,14 @@ describe('DBService: additive v5 outbox schema', () => {
     expect(service.getPerformanceMetrics()).toMatchObject({ operations: 0, errors: 1 });
     service.resetPerformanceMetrics();
     await service.init();
-    expect((await readState()).version).toBe(5);
-    expect((await readState()).records).toEqual({ ...before.records, outbox: [] });
+    expect((await readState()).version).toBe(6);
+    expect((await readState()).records).toEqual({ ...before.records, outbox: [], manualSyncArchives: [] });
     expect(service.getPerformanceMetrics()).toMatchObject({ operations: 1, errors: 0 });
   });
 });
 
 describe('DBService: explicit clear-all includes outbox in the same transaction', () => {
-  it('clears all six stores, including every outbox state, on explicit clear-all', async () => {
+  it('clears all seven stores, including every outbox state, on explicit clear-all', async () => {
     await seed(4, true);
     const service = new DBService();
     await service.init();

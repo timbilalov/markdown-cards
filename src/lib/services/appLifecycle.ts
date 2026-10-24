@@ -1,3 +1,4 @@
+import { initializeStorageSession } from './storageSession';
 import { initDB } from '../stores/dbStore';
 import { checkIsSessionAuthenticated, isAuthenticated } from '../stores/cloudStore';
 import { refreshCurrentSyncStatus, isOffline } from '../stores/cardStore';
@@ -9,13 +10,9 @@ let generation = 0;
 let cleanup: (() => void) | undefined;
 let initialization: Promise<void> | undefined;
 export function initializeApplication(): Promise<void> {
-  initialization ??= Promise.allSettled([initDB(), checkIsSessionAuthenticated()]).then(results => {
-    // Session confirmation must finish even if local storage failed, so the
-    // layout can distinguish a guest from an authenticated storage failure.
-    for (const result of results) if (result.status === 'rejected') throw result.reason;
-  }).finally(() => {
-    initialization = undefined;
-  });
+  initialization ??= checkIsSessionAuthenticated()
+    .then(authenticated => initializeStorageSession(authenticated))
+    .then(() => initDB()).finally(() => { initialization = undefined; });
   return initialization;
 }
 export function startApplication(): () => void {
@@ -29,13 +26,18 @@ export function startApplication(): () => void {
       window.addEventListener('offline', updateConnection);
       const unsubscribe = subscribeSync(() => { void refreshCurrentSyncStatus(); });
       let stopCloud: (() => void) | undefined;
+      let authRevision = 0;
       const unsubscribeAuth = isAuthenticated.subscribe(authenticated => {
+        const revision = ++authRevision;
         if (!authenticated) {
           stopCloud?.();
           stopCloud = undefined;
+          void initializeStorageSession(false).catch(error => console.error(error));
           return;
         }
         if (stopCloud) return;
+        void initializeStorageSession(true).then(session => {
+        if (!session.verified || revision !== authRevision || !mounts || current !== generation || stopCloud) return;
         const controller = new AbortController();
         const stopWorker = startCardSyncWorker();
         const cacheTimer = setTimeout(() => { void cacheManager.validateCache(controller.signal); }, 5000);
@@ -44,9 +46,10 @@ export function startApplication(): () => void {
           controller.abort();
           clearTimeout(cacheTimer); clearInterval(cacheInterval); stopWorker();
         };
+        }).catch(error => console.error('Storage context initialization failed:', error));
       });
       cleanup = () => {
-        unsubscribeAuth(); stopCloud?.(); unsubscribe();
+        ++authRevision; unsubscribeAuth(); stopCloud?.(); unsubscribe();
         window.removeEventListener('online', updateConnection); window.removeEventListener('offline', updateConnection);
       };
     }).catch(error => console.error('Application initialization failed:', error));

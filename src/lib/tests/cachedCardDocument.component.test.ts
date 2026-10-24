@@ -124,10 +124,10 @@ async function clickSave() {
 
 describe('editor recovery: actual page from cached Markdown', () => {
   it.each([
-    ['CLOUD_REMOTE_ERROR', /Диск вернул ошибку/],
-    ['CLOUD_AUTH_FAILED', /авторизации.*Диска/],
-    ['CLOUD_INVALID_RESPONSE', /некорректный ответ Диска/],
-    ['CLOUD_UNAVAILABLE', /соединиться с Диском/]
+    ['CLOUD_REMOTE_ERROR', /Облако вернуло ошибку/],
+    ['CLOUD_AUTH_FAILED', /авторизации.*облака/],
+    ['CLOUD_INVALID_RESPONSE', /некорректный ответ облака/],
+    ['CLOUD_UNAVAILABLE', /соединиться с облаком/]
   ])('explains %s when a listed file cannot be downloaded and clears the warning after recovery', async (error, message) => {
     const cached = v1.replace('# Карточка 🗂', '# Cached copy');
     await db.saveMarkdownDocument(filename, cached);
@@ -166,7 +166,7 @@ describe('editor recovery: actual page from cached Markdown', () => {
 
     await openPage();
 
-    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(/Диск вернул ошибку.*Локальная копия отсутствует/);
+    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(/Облако вернуло ошибку.*Локальная копия отсутствует/);
     expect(target.querySelector('input[placeholder="Card title"]')).toBeNull();
     expect(requireButton(/^Save$/).disabled).toBe(true);
     expect(get(cards.cardLoadSource)).toBeNull();
@@ -179,7 +179,7 @@ describe('editor recovery: actual page from cached Markdown', () => {
     onDocumentDownload(remote.http, { name: `${filename}.md` },
       () => Response.json({ success: false, error: 'CLOUD_REMOTE_ERROR' }, { status: 502 }));
     await openPage();
-    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(/Диск вернул ошибку/);
+    expect(target.querySelector('[role="alert"]')?.textContent).toMatch(/Облако вернуло ошибку/);
 
     seedRemote(v1);
     editTitle('Saved after recovery');
@@ -188,7 +188,7 @@ describe('editor recovery: actual page from cached Markdown', () => {
     expect(remote.files.get(`${filename}.md`)).toContain('# Saved after recovery');
     expect(get(cards.cardLoadWarning)).toBeNull();
     expect(target.querySelector('[role="alert"]')).toBeNull();
-    expect(target.querySelector('[role="status"]')?.textContent).toMatch(/Сохранено на Яндекс Диске/);
+    expect(target.querySelector('[role="status"]')?.textContent).toMatch(/Сохранено.*Яндекс Диск/);
   });
 
   it('migrates cached legacy explicitly offline, persists on Save and reopens the local v1 without the migration button', async () => {

@@ -1,3 +1,4 @@
+import { productionStorageContext,productionFileRequests } from './helpers/productionHttp';
 // @vitest-environment jsdom
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -16,7 +17,7 @@ const initialRemote = { 'md-cards/note.md': v1 };
 beforeAll(async () => {
   server = await createProductionHttp();
   const login = await server.request({ url: `${origin}/api/auth/login`, method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
   expect(login.status).toBe(200);
   cookie = readAuthCookie(login);
   assets = await server.readClientAssets();
@@ -26,11 +27,11 @@ afterAll(async () => { await server?.close(); });
 
 async function request(path: string, options: Omit<ProductionRequest, 'url'> = {}) {
   return server!.request({ ...options, url: new URL(path, origin).href,
-    headers: { Cookie: cookie, ...options.headers } });
+    headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie, ...options.headers } });
 }
 
 function expectNoCloudEffects(response: ProductionResponse) {
-  expect(response.effects).toEqual({ requests: [], writes: [], remote: initialRemote, unexpected: [], databaseOpens: 0 });
+  expect({...response.effects,requests:productionFileRequests(response)}).toEqual({ requests: [], writes: [], remote: initialRemote, unexpected: [], databaseOpens: 0 });
 }
 
 function documentOf(response: ProductionResponse): Document {
@@ -94,12 +95,12 @@ describe('CSP and security headers through the generated production entry', () =
 
   it.each([
     ['HTTPS redirect', 'http://app.example.invalid/card/note', {}, 301, false],
-    ['auth redirect', '/card/note', { headers: { Cookie: '' } }, 302, true],
-    ['unauthenticated API', '/api/cloud/files', { headers: { Cookie: '' } }, 401, true],
-    ['Origin refusal', '/api/cloud/upload', { method: 'POST', headers: { Origin: 'https://foreign.example.invalid' }, body: 'unread' }, 403, true],
-    ['retired API', '/api/save', { method: 'POST', headers: { Origin: origin } }, 404, true],
-    ['method refusal', '/api/cloud/download', { method: 'POST', headers: { Origin: origin } }, 405, true],
-    ['unknown API', '/api/unknown', { headers: { Accept: 'application/json' } }, 404, true]
+    ['auth redirect', '/card/note', { headers: { 'X-Storage-Context': productionStorageContext, Cookie: '' } }, 302, true],
+    ['unauthenticated API', '/api/cloud/files', { headers: { 'X-Storage-Context': productionStorageContext, Cookie: '' } }, 401, true],
+    ['Origin refusal', '/api/cloud/upload', { method: 'POST', headers: { 'X-Storage-Context': productionStorageContext, Origin: 'https://foreign.example.invalid' }, body: 'unread' }, 403, true],
+    ['retired API', '/api/save', { method: 'POST', headers: { 'X-Storage-Context': productionStorageContext, Origin: origin } }, 404, true],
+    ['method refusal', '/api/cloud/download', { method: 'POST', headers: { 'X-Storage-Context': productionStorageContext, Origin: origin } }, 405, true],
+    ['unknown API', '/api/unknown', { headers: { 'X-Storage-Context': productionStorageContext, Accept: 'application/json' } }, 404, true]
   ] as const)('protects %s without removing status, cache or auth behavior', async (_name, path, options, status, secure) => {
     const response = await request(path, options);
     expect(response.status).toBe(status);
@@ -113,7 +114,7 @@ describe('CSP and security headers through the generated production entry', () =
   });
 
   it('keeps a rendered 404 page under the same CSP instead of weakening the error response', async () => {
-    const response = await request('/card/note/missing', { headers: { Accept: 'text/html' } });
+    const response = await request('/card/note/missing', { headers: { 'X-Storage-Context': productionStorageContext, Accept: 'text/html' } });
     expect(response.status).toBe(404);
     expect(response.headers['content-type']).toContain('text/html');
     expect(response.headers['cache-control']).toBe('private, no-store');
@@ -123,26 +124,26 @@ describe('CSP and security headers through the generated production entry', () =
   });
 
   it('keeps login, same-origin Save/read and logout working with the enforced response policy', async () => {
-    const login = await request('/api/auth/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
+    const login = await request('/api/auth/login', { method: 'POST', headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, 'Content-Type': 'application/json' },
       body: JSON.stringify(productionCredentials) });
     expect(login.status).toBe(200);
     const sessionCookie = readAuthCookie(login);
     expect(login.cookies.join(';')).toContain('HttpOnly');
     expect(login.cookies.join(';')).toContain('SameSite=Strict');
     const source = v1.replace(/\r?\n/g, '\r\n');
-    const save = await request('/api/cloud/upload', { method: 'POST', headers: { Cookie: sessionCookie, Origin: origin },
+    const save = await request('/api/cloud/upload', { method: 'POST', headers: { 'X-Storage-Context': productionStorageContext, Cookie: sessionCookie, Origin: origin },
       form: { path: 'note.md', content: source, overwrite: 'true' } });
     expect(save.status).toBe(200);
     expect(save.effects.writes).toEqual([{ path: 'md-cards/note.md', source, overwrite: true }]);
-    const read = await request('/api/cloud/download?path=note.md', { headers: { Cookie: sessionCookie } });
+    const read = await request('/api/cloud/download?path=note.md', { headers: { 'X-Storage-Context': productionStorageContext, Cookie: sessionCookie } });
     expect(read.status).toBe(200);
     expect(read.text).toBe(source);
     expect(read.effects.unexpected).toEqual([]);
     expect(read.effects.databaseOpens).toBe(0);
-    const logout = await request('/api/auth/logout', { method: 'POST', headers: { Cookie: sessionCookie, Origin: origin } });
+    const logout = await request('/api/auth/logout', { method: 'POST', headers: { 'X-Storage-Context': productionStorageContext, Cookie: sessionCookie, Origin: origin } });
     expect(logout.status).toBe(200);
     expect(logout.cookies.every(value => value.includes('Max-Age=0'))).toBe(true);
-    const denied = await request('/api/cloud/files', { headers: { Cookie: '' } });
+    const denied = await request('/api/cloud/files', { headers: { 'X-Storage-Context': productionStorageContext, Cookie: '' } });
     expect(denied.status).toBe(401);
     for (const response of [login, save, read, logout, denied]) {
       expect(response.headers['cache-control']).toBe('private, no-store');

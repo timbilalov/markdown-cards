@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFile, fork, type ChildProcess } from 'node:child_process';
 import { cp, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,16 @@ export const productionSessionSecret = '88'.repeat(32);
 export const productionPrivateCloudToken = 'production-private-cloud-token';
 export const productionLegacyClientToken = 'production-legacy-client-token';
 export const productionPasswordHash = '$2b$04$dOefitQKRsCSxLbUpW2PDOmCn802Xp74FT5jKLLIqfCTxWQZs1cV6';
+
+// Independent fixture identity, passed explicitly by older HTTP scenarios.
+export const productionStorageContext='ctx-v1-'+createHash('sha256').update(JSON.stringify([
+ 'markdown-cards-storage-context',1,'yandex','yandex','fixture-account',JSON.stringify(['fixture-folder','disk:/md-cards'])
+])).digest('hex');
+// Identity verification is permitted before body validation, file I/O is not.
+export function productionFileRequests(response:ProductionResponse){return response.effects.requests.filter(request=>{
+ const url=new URL(request.url);return !(url.origin==='https://cloud-api.yandex.net'&&
+ (url.pathname==='/v1/disk'&&url.searchParams.get('fields')==='user.uid'||url.pathname==='/v1/disk/resources'&&url.searchParams.get('fields')==='type,path,resource_id'));
+});}
 
 export interface ProductionRequest {
   url: string;
@@ -69,7 +80,7 @@ const productionTargets: Record<string, {
 
 // Build the actual working sources/config in isolation on every suite invocation.
 // Never consume stale repository output or load the developer's env files.
-export async function createProductionHttp() {
+export async function createProductionHttp(options: { storages?: unknown[]; activeStorageId?: string } = {}) {
   const root = resolve(import.meta.dirname, '../../../..');
   const target = process.env.PRODUCTION_TEST_TARGET ?? 'vercel';
   if (!Object.hasOwn(productionTargets, target)) {
@@ -86,8 +97,8 @@ export async function createProductionHttp() {
     ADMIN_PASSWORD_HASH: productionPasswordHash,
     SESSION_SECRET: productionSessionSecret,
     VITE_YANDEX_DISK_TOKEN: productionLegacyClientToken,
-    CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: productionPrivateCloudToken,
-    YANDEX_DISK_BASE_PATH: 'md-cards'
+    CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: productionPrivateCloudToken, rootPath: 'md-cards' }]),
+    ...(options.storages ? { CLOUD_STORAGES: JSON.stringify(options.storages), CLOUD_STORAGE_ACTIVE: options.activeStorageId ?? 'dropbox' } : {})
   };
   async function close() {
     if (child && child.exitCode === null && child.signalCode === null) {

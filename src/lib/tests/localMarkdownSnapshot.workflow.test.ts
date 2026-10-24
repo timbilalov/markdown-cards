@@ -102,7 +102,7 @@ describe.each(['new v1', 'existing v1', 'migrated legacy'] as const)('local snap
         result: { status: 'success', document: { source: expected.source } }
       });
       expect(get(cards.cardSaveError)).toBeNull();
-      expect(get(cards.cardSaveMessage)).toMatch(/сохранено.*Диске/i);
+      expect(get(cards.cardSaveMessage)).toMatch(/сохранено.*Яндекс Диск/i);
     } else {
       expect(await new DBService().getLocalMarkdownSnapshot(expected.filename)).toEqual({ ...expected, saveId: expect.any(String) });
       expect(await db.getMarkdownDocument(expected.filename)).toEqual(previousRemoteCache);

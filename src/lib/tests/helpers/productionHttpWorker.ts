@@ -5,10 +5,17 @@ import type { ProductionWorkerMessage, ProductionResponse } from './productionHt
 // Only external I/O is substituted; no framework, auth, route or config mocks.
 let effects: ProductionResponse['effects'];
 let requestNumber = 0;
+let dropboxSequence = 0;
+let dropboxRevisions = new Map<string, string>();
 function reset(remote: Record<string, string>) {
   effects = { requests: [], writes: [], remote: { ...remote }, unexpected: [], databaseOpens: 0 };
+  dropboxSequence=0;dropboxRevisions=new Map(Object.keys(remote).filter(key=>key.startsWith('dropbox:')).map(key=>[key,'fixture-revision']));
 }
 reset({});
+function dropboxMetadata(key:string){
+ const path=key.slice('dropbox:'.length);
+ return {'.tag':'file',name:path.slice(path.lastIndexOf('/')+1),path_lower:path.toLowerCase(),rev:dropboxRevisions.get(key),server_modified:'2026-10-19T00:00:00Z'};
+}
 globalThis.fetch = async (input, init) => {
   const address = input instanceof Request ? input.url : String(input);
   const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
@@ -20,23 +27,50 @@ globalThis.fetch = async (input, init) => {
     effects.unexpected.push(`${method} ${address}`);
     throw new Error('Unexpected relative HTTP in production test');
   }
+  if (url.origin === 'https://api.dropboxapi.com' && method === 'POST') {
+    if (url.pathname === '/oauth2/token') return Response.json({access_token:'fixture-access-token',expires_in:14400});
+    if (url.pathname === '/2/users/get_current_account') return Response.json({account_id:'dbid:fixture-account',root_info:{home_namespace_id:'fixture-home',root_namespace_id:'fixture-home'}});
+    const body=JSON.parse(String(init?.body));
+    if(url.pathname==='/2/files/get_metadata')return Response.json({'.tag':'folder',id:`fixture-folder:${body.path}`,path_lower:body.path.toLowerCase()});
+    if(url.pathname==='/2/files/list_folder'){
+      const prefix=`dropbox:${body.path}/`;
+      return Response.json({entries:Object.keys(effects.remote).filter(key=>key.startsWith(prefix)&&!key.slice(prefix.length).includes('/')).map(key=>dropboxMetadata(key)),cursor:'fixture-cursor',has_more:false});
+    }
+  }
+  if(url.origin==='https://content.dropboxapi.com'&&method==='POST'){
+    const argument=JSON.parse(new Headers(init?.headers).get('Dropbox-API-Arg')??'null');
+    const requested=`dropbox:${argument.path}`;
+    const existing=Object.keys(effects.remote).find(key=>key.toLowerCase()===requested.toLowerCase());
+    if(url.pathname==='/2/files/download')return existing
+      ? new Response(new TextEncoder().encode(effects.remote[existing]),{headers:{'Dropbox-API-Result':JSON.stringify(dropboxMetadata(existing))}})
+      : Response.json({error:{'.tag':'path',path:{'.tag':'not_found'}}},{status:409});
+    if(url.pathname==='/2/files/upload'){
+      if(argument.mode==='add'&&existing || argument.mode?.['.tag']==='update'&&(!existing||dropboxRevisions.get(existing)!==argument.mode.update))return Response.json({error:{'.tag':'path',path:{reason:{'.tag':'conflict'}}}},{status:409});
+      const key=existing??requested;const source=new TextDecoder('utf8',{ignoreBOM:true}).decode(await new Response(init?.body).arrayBuffer());
+      effects.writes.push({path:key,source,overwrite:argument.mode!=='add'});effects.remote[key]=source;dropboxRevisions.set(key,`fixture-revision-${++dropboxSequence}`);
+      return Response.json(dropboxMetadata(key));
+    }
+  }
   // Explicit read fixtures for the private-cache suite; all data stays in memory.
   // Existing upload handling and rejection of every other external request remain.
   const providerHeaders = { 'Cache-Control': 'public, max-age=3600', ETag: '"provider-version"' };
   if (url.origin === 'https://cloud-api.yandex.net' && method === 'GET') {
     const path = url.searchParams.get('path') ?? '';
-    if (url.pathname === '/v1/disk/resources/download' && path.startsWith('disk:/md-cards/')) {
+    if(url.pathname==='/v1/disk'&&url.searchParams.get('fields')==='user.uid')return Response.json({user:{uid:'fixture-account'}});
+    if(url.pathname==='/v1/disk/resources'&&url.searchParams.get('fields')==='type,path,resource_id')return Response.json({type:'dir',path,resource_id:path==='disk:/md-cards'?'fixture-folder':`fixture-folder:${path}`});
+    if (url.pathname === '/v1/disk/resources/download' && path.startsWith('disk:/')) {
       const key = path.slice('disk:/'.length);
       if (!Object.hasOwn(effects.remote, key)) return new Response(null, { status: 404 });
       const href = new URL('https://downloader.disk.yandex.ru/disk/private-cache');
       href.searchParams.set('path', key);
       return Response.json({ href: href.href, method: 'GET', templated: false }, { headers: providerHeaders });
     }
-    if (url.pathname === '/v1/disk/resources' && path === 'disk:/md-cards') {
+    if (url.pathname === '/v1/disk/resources' && path.startsWith('disk:/')) {
       const offset = Number(url.searchParams.get('offset') ?? 0);
       const limit = Number(url.searchParams.get('limit') ?? 100);
-      const items = Object.keys(effects.remote).filter(key => key.startsWith('md-cards/')).map(key => ({
-        name: key.slice('md-cards/'.length), path: `disk:/${key}`, type: 'file'
+      const prefix=path.slice('disk:/'.length)+'/';
+      const items = Object.keys(effects.remote).filter(key => key.startsWith(prefix)&&!key.slice(prefix.length).includes('/')).map(key => ({
+        name: key.slice(prefix.length), path: `disk:/${key}`, type: 'file'
       }));
       return Response.json({ type: 'dir', path, _embedded: { path, offset, limit, total: items.length,
         items: items.slice(offset, offset + limit) } }, { headers: providerHeaders });
@@ -57,7 +91,7 @@ globalThis.fetch = async (input, init) => {
     const providerPath = url.searchParams.get('path') ?? '';
     const path = providerPath.startsWith('disk:/') ? providerPath.slice('disk:/'.length) : providerPath;
     const overwrite = url.searchParams.get('overwrite') === 'true';
-    const source = await new Response(init?.body).text();
+    const source = new TextDecoder('utf8',{ignoreBOM:true}).decode(await new Response(init?.body).arrayBuffer());
     if (!overwrite && Object.hasOwn(effects.remote, path)) return new Response(null, { status: 409 });
     effects.writes.push({ path, source, overwrite });
     effects.remote[path] = source;
@@ -101,7 +135,7 @@ try {
           : await application.fetch(request);
         const result: ProductionResponse = {
           status: response.status, headers: Object.fromEntries(response.headers),
-          cookies: response.headers.getSetCookie(), text: await response.text(),
+          cookies: response.headers.getSetCookie(), text: new TextDecoder('utf8',{ignoreBOM:true}).decode(await response.arrayBuffer()),
           bodyUsed: request.bodyUsed, effects
         };
         process.send?.({ id: message.id, result });

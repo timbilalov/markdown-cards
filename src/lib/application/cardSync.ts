@@ -36,6 +36,7 @@ export interface SyncDependencies {
   // means the platform cannot guarantee ownership. Local Save needs no lock.
   exclusive(task: () => Promise<void>): Promise<boolean | null>;
   onChange?(): void;
+  checkIsDeliveryBlocked?(path: string): Promise<boolean>;
   deliverySignal?: AbortSignal;
 }
 
@@ -102,6 +103,7 @@ export class CardSync {
 
   async status(path: string, saveId?: string, source?: string): Promise<DeliveryStatusResult> {
     try {
+      if (await this.deps.checkIsDeliveryBlocked?.(path)) return { status: 'uncertain', ...(saveId ? { saveId } : {}) };
       const current = await this.deps.saves.readCurrent(path);
       if (current.draft && !checkHasLinkedDraft(current, path)) return { status: 'legacy' };
       if (saveId && current.draft?.saveId !== saveId) {
@@ -142,6 +144,7 @@ export class CardSync {
           let progressed = false;
           for (const path of new Set(rows.map(row => row.path))) {
             if (signal?.aborted) return;
+            if (await this.deps.checkIsDeliveryBlocked?.(path)) { status = 'uncertain'; continue; }
             const current = await this.deps.saves.readCurrent(path);
             const operation = current.operation;
             const blocked = rows.find(row => row.path === path && ['uncertain', 'conflict'].includes(row.state.status));
@@ -182,6 +185,7 @@ export class CardSync {
       previous = ancestor.previousSaveId;
     }
     let outcome: OutboxDeliveryOutcome | undefined;
+    let expectedRevision: string | undefined;
     try {
       const remote = await this.deps.cloud.read(operation.path, signal);
       if (signal?.aborted) return 'pending';
@@ -194,6 +198,10 @@ export class CardSync {
               ? base.revision === remote.document.revision
               : baseSource !== undefined && baseSource === remote.document.source);
         if (!matches) outcome = { status: 'conflict' };
+        else if (!createOnly && this.deps.cloud.getCapabilities().conditionalUpdate && remote.status === 'found') {
+          if (remote.document.revision === null) outcome = { status: 'failed', reason: 'unsupported', outcome: 'not-written' };
+          else expectedRevision = remote.document.revision;
+        }
       }
     } catch { outcome = { status: 'failed', reason: 'network', outcome: 'not-written' }; }
     if (signal?.aborted) return 'pending';
@@ -205,7 +213,8 @@ export class CardSync {
     if (signal?.aborted) outcome = { status: 'failed', reason: 'network', outcome: 'not-written' };
     if (!outcome) {
       try {
-        const result = await this.deps.cloud.write({ path: operation.path, source: operation.source, createOnly });
+        const result = await this.deps.cloud.write({ path: operation.path, source: operation.source, createOnly,
+          ...(expectedRevision === undefined ? {} : { expectedRevision }) });
         if (result.status === 'written' || result.status === 'conflict') outcome = result;
         else outcome = { status: 'failed', reason: result.status === 'unavailable' ? result.reason
           : result.status === 'invalid' ? 'validation' : 'unsupported',

@@ -1,3 +1,4 @@
+import { currentTestDatabaseName } from './browserStorageContext';
 import type { Card } from '../../domain/types';
 import type { CloudFile } from '../../types/cloud';
 import { parseMarkdownDocument } from '../../domain/markdown';
@@ -19,8 +20,9 @@ async function transaction<T>(stores: string[], mode: IDBTransactionMode,
   run: (tx: IDBTransaction) => () => T): Promise<T> {
   // Init the current schema only; seed content independently of production saves.
   await (await import('../../services/dbService')).dbService.init();
+  const databaseName=await currentTestDatabaseName();
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('MarkdownCardsDB');
+    const request = indexedDB.open(databaseName);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });

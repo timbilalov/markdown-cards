@@ -1,3 +1,4 @@
+import { initializeTestStorage, browserStorageDescriptor } from './helpers/browserStorageContext';
 import { historicalStorage } from './helpers/historicalStorage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeCard, NOW, storedCard } from './helpers/fixtures';
@@ -23,6 +24,7 @@ beforeEach(async () => {
   http.on('GET', '/api/cloud/files', () => Response.json({ _embedded: { items: [
     { name: 'test-card.md', path: 'test-card.md' }
   ] } }));
+  await initializeTestStorage(http);
   runtime = await import('svelte');
   db = (await import('../services/dbService')).dbService;
   await (await import('../stores/cloudStore')).checkIsSessionAuthenticated();
@@ -72,7 +74,7 @@ describe('board: listed files with an unknown remote modification time', () => {
     http.on('GET', '/api/cloud/download?path=test-card.md', () => new Response(v1));
     await renderPage('mixed');
 
-    expect(downloads()).toEqual([['/api/cloud/download?path=test-card.md', { method: 'GET', signal: expect.any(AbortSignal) }]]);
+    expect(downloads()).toEqual([['/api/cloud/download?path=test-card.md', { method: 'GET', signal: expect.any(AbortSignal), headers:{'X-Storage-Context':browserStorageDescriptor.contextId} }]]);
     expect(tile().querySelector('h3')?.textContent).toBe(v1Card.title);
     expect(tile().querySelector('.modified-date')?.textContent).toContain(new Date(v1Card.meta.modified).toLocaleDateString());
     expect(await db.getCard('test-card')).toEqual(storedCard(v1Card));
@@ -87,7 +89,7 @@ describe('board: listed files with an unknown remote modification time', () => {
     http.on('GET', '/api/cloud/download?path=test-card.md', () => new Response(null, { status: 401 }));
     await renderPage('mixed');
 
-    expect(downloads()).toEqual([['/api/cloud/download?path=test-card.md', { method: 'GET', signal: expect.any(AbortSignal) }]]);
+    expect(downloads()).toEqual([['/api/cloud/download?path=test-card.md', { method: 'GET', signal: expect.any(AbortSignal), headers:{'X-Storage-Context':browserStorageDescriptor.contextId} }]]);
     expect(tile().querySelector('h3')?.textContent).toBe(local.title);
     expect(tile().querySelector('.modified-date')?.textContent).toContain(new Date(local.meta.modified).toLocaleDateString());
     expect(tile().querySelector('img')?.getAttribute('src')).toBe(local.image);
@@ -103,7 +105,7 @@ describe('board: listed files with an unknown remote modification time', () => {
 
     expect(tile().querySelector('.modified-date')?.textContent).toContain(new Date(v1Card.meta.modified).toLocaleDateString());
     expect(tile().querySelector('h3')?.textContent).toBe(v1Card.title);
-    expect(downloads()).toEqual([['/api/cloud/download?path=test-card.md', { method: 'GET', signal: expect.any(AbortSignal) }]]);
+    expect(downloads()).toEqual([['/api/cloud/download?path=test-card.md', { method: 'GET', signal: expect.any(AbortSignal), headers:{'X-Storage-Context':browserStorageDescriptor.contextId} }]]);
     expect(target.querySelectorAll('a[data-source]')).toHaveLength(2);
   });
 });

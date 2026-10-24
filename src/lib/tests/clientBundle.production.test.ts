@@ -13,7 +13,7 @@ it('emits public assets without private/public test secrets or provider OAuth tr
   const assets = await production!.readClientAssets();
   expect(assets.filter(asset => asset.path.endsWith('.js')).length).toBeGreaterThan(0);
   // Prove this is the application's client output, not an empty/wrong folder.
-  expect(assets.some(asset => asset.content.includes('/api/cloud/files'))).toBe(true);
+  expect(assets.some(asset => asset.content.includes('/api/storages'))).toBe(true);
   const forbidden = [productionLegacyClientToken, productionPrivateCloudToken,
     productionPasswordHash, productionSessionSecret, 'VITE_YANDEX_DISK_TOKEN',
     'cloud-api.yandex.net', 'OAuth '];

@@ -1,3 +1,4 @@
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 // @vitest-environment node
 import { onCloudUpload } from './helpers/cloudUploadHttp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,7 @@ import { byteLength, inputCredentials, inputOrigin as origin, inputSource, login
   loginBodyLimit, multipartBody, multipartType, uploadBodyAtSize, uploadBodyLimit,
   uploadFilename } from './helpers/requestBodyFixtures';
 
-vi.mock('$env/dynamic/private', () => ({ env: { ADMIN_USERNAME: 'test-user', ADMIN_PASSWORD_HASH: '$2b$04$dOefitQKRsCSxLbUpW2PDOmCn802Xp74FT5jKLLIqfCTxWQZs1cV6', CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: 'test-only-token', YANDEX_DISK_BASE_PATH: 'md-cards', SESSION_SECRET: '99'.repeat(32) } }));
+vi.mock('$env/dynamic/private', () => ({ env: { ADMIN_USERNAME: 'test-user', ADMIN_PASSWORD_HASH: '$2b$04$dOefitQKRsCSxLbUpW2PDOmCn802Xp74FT5jKLLIqfCTxWQZs1cV6', CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'test-only-token', rootPath: 'md-cards' }]), SESSION_SECRET: '99'.repeat(32) } }));
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 type Endpoint = 'login' | 'upload';
@@ -33,7 +34,7 @@ function cookieJar(endpoint: Endpoint) {
 }
 
 function request(endpoint: Endpoint, body: BodyInit, headers: HeadersInit = {}) {
-  const requestHeaders = new Headers({ Origin: origin, 'Content-Type': types[endpoint] });
+  const requestHeaders = new Headers({ 'X-Storage-Context': fixtureStorageContext(), Origin: origin, 'Content-Type': types[endpoint] });
   new Headers(headers).forEach((value, key) => requestHeaders.set(key, value));
   // Native Node Request requires duplex for a real streaming request body.
   const init: RequestInit & { duplex?: 'half' } = { method: 'POST', headers: requestHeaders, body, duplex: 'half' };
@@ -41,6 +42,7 @@ function request(endpoint: Endpoint, body: BodyInit, headers: HeadersInit = {}) 
 }
 
 async function through(endpoint: Endpoint, input: Request, jar = cookieJar(endpoint)) {
+  if(endpoint==='upload') input.headers.set('X-Storage-Context',fixtureStorageContext());
   const event = { url: new URL(input.url), request: input, cookies: jar, locals: {}, params: {},
     route: { id: paths[endpoint] }, getClientAddress: () => '127.0.0.1' } as unknown as RequestEvent;
   const response = await runHandle(handle, { event, resolve: current => Promise.resolve(handlers[endpoint](current)) });
@@ -70,7 +72,7 @@ async function expectRefusal(endpoint: Endpoint, result: Awaited<ReturnType<type
   expect(jar.delete).not.toHaveBeenCalled();
   expect(validateCredentials).not.toHaveBeenCalled();
   expect(parseMarkdown).not.toHaveBeenCalled();
-  expect(http.fetch).not.toHaveBeenCalled();
+  expect(fileRequests(http)).toEqual([]);
   expect(writes).toEqual([]);
   expect(remote).toBe('Original remote source');
 }
@@ -83,12 +85,12 @@ async function expectValidRetry(endpoint: Endpoint, contentType = types[endpoint
     expect(await response.json()).toEqual({ message: 'Login successful', user: { username: inputCredentials.username } });
     expect(sessions.verifySession(jar.values.get('auth_token'))).toMatchObject({ username: inputCredentials.username });
     expect(validateCredentials).toHaveBeenCalledExactlyOnceWith(inputCredentials.username, inputCredentials.password);
-    expect(http.fetch).not.toHaveBeenCalled();
+    expect(fileRequests(http)).toEqual([]);
   } else {
     expect(await response.text()).toBe('File uploaded successfully');
     expect(writes).toEqual([{ filename: uploadFilename, source: expectedSource, overwrite: true }]);
     expect(remote).toBe(expectedSource);
-    expect(http.fetch).toHaveBeenCalledTimes(2);
+    expect(fileRequests(http)).toHaveLength(2);
   }
 }
 
@@ -113,7 +115,7 @@ beforeEach(async () => {
   vi.setSystemTime(1790769600000);
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'test-only-token');
-  http = mockHttp();
+  http = mockHttp(); mockStorageIdentity(http, 'md-cards');
   remote = 'Original remote source';
   writes = [];
   const api = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
@@ -174,7 +176,7 @@ describe('HTTP request media types before credential, Markdown or cloud work', (
     const { response } = await through('upload', retry);
     expect(response.status).toBe(200);
     expect(writes).toEqual([{ filename: uploadFilename, source: inputSource, overwrite: true }]);
-    expect(http.fetch).toHaveBeenCalledTimes(2);
+    expect(fileRequests(http)).toHaveLength(2);
   });
 
   it.each(['login', 'upload'] as const)('refuses a compressed %s declaration and permits identity', async endpoint => {

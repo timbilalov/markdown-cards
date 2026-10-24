@@ -6,6 +6,8 @@ import { readResponseBytes, readResponseJson } from './providerResponse';
 import { cloudRequestSignal, providerOperationTimeoutMs } from '../../utils/cloudRequestSignal';
 import { checkIsMarkdownFilename } from '../../domain/markdownFilename';
 
+import type { StorageIdentityResult } from './storageRegistry';
+
 const resourcesUrl = 'https://cloud-api.yandex.net/v1/disk/resources';
 const configurationError = 'Invalid Yandex Disk configuration';
 // Application budgets, not provider API limits. Listing budgets are per call.
@@ -161,7 +163,8 @@ export class YandexDiskAdapter implements CloudStoragePort {
     return { revisions: false, conditionalCreate: true };
   }
 
-  async write({ path, source, createOnly }: CloudWriteRequest): Promise<CloudWriteResult> {
+  async write({ path, source, createOnly, expectedRevision }: CloudWriteRequest): Promise<CloudWriteResult> {
+    if (expectedRevision !== undefined) return { status: 'unsupported', operation: 'conditional-update' };
     const signal = cloudRequestSignal(undefined, providerOperationTimeoutMs);
     if (createOnly !== undefined && typeof createOnly !== 'boolean') {
       return { status: 'invalid', reason: 'invalid-create-only' };
@@ -288,6 +291,25 @@ export class YandexDiskAdapter implements CloudStoragePort {
       }
       return { status: 'found', document: { path, source, revision: null } };
     }
+  }
+
+  async identify(): Promise<StorageIdentityResult> {
+    const signal = cloudRequestSignal(undefined, providerOperationTimeoutMs);
+    try {
+      const headers = { Authorization: `OAuth ${this.accessToken}`, Accept: 'application/json' };
+      const accountResponse = await fetch('https://cloud-api.yandex.net/v1/disk?fields=user.uid', { headers, signal, redirect: 'error' });
+      if (accountResponse.status !== 200) return createHttpFailure(accountResponse.status);
+      const account = await readResponseJson(accountResponse, responseLimits.link);
+      if (account.status !== 'success' || !checkIsRecord(account.value) || !checkIsRecord(account.value.user)
+        || typeof account.value.user.uid !== 'string' || !account.value.user.uid.trim()) return { status: 'unavailable', reason: 'invalid-response' };
+      const response = await fetch(`${resourcesUrl}?path=${encodeURIComponent(this.rootPath)}&fields=type,path,resource_id`, { headers, signal, redirect: 'error' });
+      if (response.status !== 200) return createHttpFailure(response.status);
+      const root = await readResponseJson(response, responseLimits.link);
+      if (root.status !== 'success' || !checkIsRecord(root.value) || root.value.type !== 'dir' || root.value.path !== this.rootPath
+        || typeof root.value.resource_id !== 'string' || !root.value.resource_id.trim()) return { status: 'unavailable', reason: 'invalid-response' };
+      return { status: 'success', identity: { provider: 'yandex', accountId: account.value.user.uid,
+        rootId: JSON.stringify([root.value.resource_id, root.value.path]) } };
+    } catch { return { status: 'unavailable', reason: 'network' }; }
   }
 
   async list(): Promise<CloudListResult> {

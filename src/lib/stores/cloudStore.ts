@@ -1,5 +1,5 @@
 import { stateField } from './appState';
-import { derived, get } from 'svelte/store';
+import { get } from 'svelte/store';
 import type { CloudFile } from '../types/cloud';
 import { cloudService } from '../services/cloudService';
 import { performanceMonitor } from '../services/performanceMonitor';
@@ -131,8 +131,3 @@ export async function checkIsSessionAuthenticated(): Promise<boolean> {
     return false;
   }
 }
-
-// Derived store for markdown files only
-export const markdownFiles = derived(cloudFiles, ($cloudFiles) => {
-  return $cloudFiles.filter(file => file.name.endsWith('.md'));
-});

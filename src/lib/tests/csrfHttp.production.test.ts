@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { productionStorageContext,productionFileRequests } from './helpers/productionHttp';
 import { createHmac } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createProductionHttp, productionOrigin as origin, productionCredentials,
@@ -22,7 +23,7 @@ const foreignOrigin = 'https://foreign.example.invalid';
 
 function mutation(path: string, media: Media, source: string | null, cookie?: string,
   accept?: string, method = 'POST', base = origin): ProductionRequest {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { 'X-Storage-Context': productionStorageContext };
   if (source !== null) headers.Origin = source;
   if (cookie) headers.Cookie = cookie;
   if (accept) headers.Accept = accept;
@@ -50,7 +51,7 @@ function expiredAuthCookie(): string {
 
 async function login() {
   const response = await server.request({ url: `${origin}/api/auth/login`, method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
   expect(response.status).toBe(200);
   return readAuthCookie(response);
 }
@@ -63,7 +64,7 @@ function expectForbidden(response: ProductionResponse) {
   expect(JSON.parse(response.text)).toEqual({ error: 'Forbidden', code: 'CSRF_ORIGIN_DENIED' });
   expect(response.cookies).toEqual([]);
   expect(response.bodyUsed).toBe(false);
-  expect(response.effects.requests).toEqual([]);
+  expect(productionFileRequests(response)).toEqual([]);
   expect(response.effects.unexpected).toEqual([]);
   expect(response.effects.databaseOpens).toBe(0);
 }
@@ -75,7 +76,7 @@ describe('production adapter → SvelteKit → application CSRF boundary', () =>
     const cookie = await login();
     const jsonDenial = await server.request(mutation('/api/auth/logout', 'json', source, cookie, accept));
     const formDenial = await server.request(mutation('/api/auth/logout', media, source, cookie, accept));
-    const stillAuthenticated = await server.request({ url: `${origin}/api/auth/status`, headers: { Cookie: cookie } });
+    const stillAuthenticated = await server.request({ url: `${origin}/api/auth/status`, headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie } });
     const retry = await server.request(mutation('/api/auth/logout', media, origin, cookie, accept));
 
     expect(JSON.parse(stillAuthenticated.text)).toEqual({ authenticated: true, username: 'test-user' });
@@ -100,7 +101,7 @@ describe('production adapter → SvelteKit → application CSRF boundary', () =>
       expect(response.headers.location).toBeUndefined();
       expect(response.bodyUsed).toBe(false);
       expect(response.cookies).toEqual([]);
-      expect(response.effects.requests).toEqual([]);
+      expect(productionFileRequests(response)).toEqual([]);
     }
   });
 
@@ -108,7 +109,7 @@ describe('production adapter → SvelteKit → application CSRF boundary', () =>
     const denied = await server.request(mutation('/api/auth/login', media, foreignOrigin));
     const allowed = await server.request(mutation('/api/auth/login', 'json', origin));
     const cookie = readAuthCookie(allowed);
-    const user = await server.request({ url: `${origin}/api/auth/user`, headers: { Cookie: cookie } });
+    const user = await server.request({ url: `${origin}/api/auth/user`, headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie } });
     expect(allowed.status).toBe(200);
     expect(JSON.parse(allowed.text)).toEqual({ message: 'Login successful', user: { username: 'test-user' } });
     expect(user.status).toBe(200);
@@ -135,7 +136,7 @@ describe('production adapter → SvelteKit → application CSRF boundary', () =>
     expect(accepted.status).toBe(200);
     expect(accepted.effects.writes).toEqual([{ path, source, overwrite }]);
     expect(accepted.effects.remote).toEqual({ [path]: source });
-    expect(accepted.effects.requests).toHaveLength(2);
+    expect(productionFileRequests(accepted)).toHaveLength(2);
     expectForbidden(denied);
   });
 
@@ -183,9 +184,9 @@ describe('production adapter → SvelteKit → application CSRF boundary', () =>
   it('preserves safe reads and page redirects around a denied form request', async () => {
     const cookie = await login();
     const denied = await server.request(mutation('/api/save', 'urlencoded', null, cookie));
-    const status = await server.request({ url: `${origin}/api/auth/status`, headers: { Cookie: cookie } });
-    const user = await server.request({ url: `${origin}/api/auth/user`, headers: { Cookie: cookie } });
-    const head = await server.request({ url: `${origin}/api/auth/status`, method: 'HEAD', headers: { Cookie: cookie } });
+    const status = await server.request({ url: `${origin}/api/auth/status`, headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie } });
+    const user = await server.request({ url: `${origin}/api/auth/user`, headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie } });
+    const head = await server.request({ url: `${origin}/api/auth/status`, method: 'HEAD', headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie } });
     const page = await server.request({ url: `${origin}/card/note` });
     expect(JSON.parse(status.text)).toEqual({ authenticated: true, username: 'test-user' });
     expect(JSON.parse(user.text)).toEqual({ username: 'test-user' });

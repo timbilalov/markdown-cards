@@ -1,3 +1,4 @@
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 // @vitest-environment node
 import { onCloudUpload } from './helpers/cloudUploadHttp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +7,7 @@ import { runHandle } from './helpers/serverRequest';
 import { mockHttp } from './helpers/http';
 import { v1 } from './helpers/markdownReadFixtures';
 
-vi.mock('$env/dynamic/private', () => ({ env: { ADMIN_USERNAME: 'test-user', ADMIN_PASSWORD_HASH: '$2b$04$dOefitQKRsCSxLbUpW2PDOmCn802Xp74FT5jKLLIqfCTxWQZs1cV6', CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: 'test-only-token', YANDEX_DISK_BASE_PATH: 'md-cards', SESSION_SECRET: '66'.repeat(32) } }));
+vi.mock('$env/dynamic/private', () => ({ env: { ADMIN_USERNAME: 'test-user', ADMIN_PASSWORD_HASH: '$2b$04$dOefitQKRsCSxLbUpW2PDOmCn802Xp74FT5jKLLIqfCTxWQZs1cV6', CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'test-only-token', rootPath: 'md-cards' }]), SESSION_SECRET: '66'.repeat(32) } }));
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 const origin = 'https://app.example.invalid';
@@ -43,7 +44,8 @@ function authenticatedJar() {
 // Explicit Origin in each mutation models a browser request. Missing remains missing.
 function event(path: string, jar = authenticatedJar(), init: RequestInit = {}, base = origin): RequestEvent {
   const url = new URL(path, base);
-  return { url, request: new Request(url, init), cookies: jar, locals: {}, params: {},
+  const contextHeaders=new Headers(init.headers); contextHeaders.set('X-Storage-Context',fixtureStorageContext());
+  return { url, request: new Request(url, {...init,headers:contextHeaders}), cookies: jar, locals: {}, params: {},
     route: { id: path }, getClientAddress: () => '127.0.0.1' } as unknown as RequestEvent;
 }
 
@@ -77,7 +79,7 @@ beforeEach(async () => {
   vi.setSystemTime(NOW);
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'test-only-token');
-  http = mockHttp();
+  http = mockHttp(); mockStorageIdentity(http, 'md-cards');
   sessions = await import('../server/session');
   logger = (await import('../utils/logger')).default;
   handle = (await import('../../hooks.server')).handle;
@@ -117,7 +119,7 @@ describe('one strict Origin policy at the application hook', () => {
     expect([...jar.values]).toEqual(before);
     expect(jar.set).not.toHaveBeenCalled();
     expect(jar.delete).not.toHaveBeenCalled();
-    expect(http.fetch).not.toHaveBeenCalled();
+    expect(fileRequests(http)).toEqual([]);
     expect(logs()).not.toContain(jar.values.get('auth_token'));
     expect(logs()).not.toContain(csrf);
     expect(logs()).not.toContain('request body');
@@ -269,7 +271,7 @@ describe('real auth and upload handlers behind the Origin gate', () => {
     expect(jar.set).not.toHaveBeenCalled();
     expect(jar.delete).not.toHaveBeenCalled();
     expect(logs()).not.toContain(PASSWORD);
-    expect(http.fetch).not.toHaveBeenCalled();
+    expect(fileRequests(http)).toEqual([]);
   });
 
   it.each(['absent', 'unsigned', 'expired', 'valid'])('protects logout for a %s session and permits same-origin cleanup', async kind => {
@@ -318,12 +320,12 @@ describe('real auth and upload handlers behind the Origin gate', () => {
     expect(denied.request.bodyUsed).toBe(false);
     expect(remote).toBe(previous);
     expect(writes).toEqual([]);
-    expect(http.fetch).not.toHaveBeenCalled();
+    expect(fileRequests(http)).toEqual([]);
     const accepted = await through(upload, request(origin));
     expect(accepted.status).toBe(200);
     expect(writes).toEqual([source]);
     expect(remote).toBe(source);
-    expect(http.fetch).toHaveBeenCalledTimes(2);
+    expect(fileRequests(http)).toHaveLength(2);
     expect(jar.set).not.toHaveBeenCalled();
   });
 

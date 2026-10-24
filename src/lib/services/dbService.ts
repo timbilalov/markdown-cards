@@ -1,3 +1,4 @@
+import { IndexedDbManualLocalStorage } from '../adapters/indexedDb/manualLocalStorage';
 import type { BoardLocalCard, BoardLocalEntry, Card, MarkdownParseResult } from '../domain/types';
 import { parseMarkdownDocument } from '../domain/markdown';
 import { IndexedDbMarkdownSourceRepository } from '../adapters/indexedDb/markdownSourceRepository';
@@ -23,6 +24,14 @@ export interface LocalMarkdownSnapshot {
   filename: string;
   source: string;
   saveMode: 'create' | 'update';
+}
+
+export interface LocalCacheContents {
+  notes: number;
+  drafts: number;
+  pendingOperations: number;
+  historicalOperations: number;
+  archives: number;
 }
 
 
@@ -58,14 +67,15 @@ export class DBTransactionError extends DBError {
 export class DBService {
   private db: IDBDatabase | null = null;
   private initialization: Promise<void> | null = null;
-  private readonly DB_NAME = 'MarkdownCardsDB';
-  private readonly VERSION = 5;
+  constructor(private readonly databaseName = 'MarkdownCardsDB') {}
+  private readonly VERSION = 6;
   private readonly CARDS_STORE = 'cards';
   private readonly FILES_STORE = 'files';
   private readonly SYNC_QUEUE_STORE = 'syncQueue'; // Retained historical records; never replayed
   private readonly MARKDOWN_DOCUMENTS_STORE = 'markdownDocuments';
   private readonly LOCAL_MARKDOWN_SNAPSHOTS_STORE = 'localMarkdownSnapshots';
   private readonly OUTBOX_STORE = 'outbox';
+  private readonly MANUAL_SYNC_ARCHIVES_STORE = 'manualSyncArchives';
 
   // Performance monitoring
   private performanceMetrics: {
@@ -98,7 +108,7 @@ export class DBService {
     const startTime = performance.now();
 
     try {
-      const request = indexedDB.open(this.DB_NAME, this.VERSION);
+      const request = indexedDB.open(this.databaseName, this.VERSION);
 
       return new Promise((resolve, reject) => {
         let isRejected = false;
@@ -151,6 +161,10 @@ export class DBService {
               db.createObjectStore(this.LOCAL_MARKDOWN_SNAPSHOTS_STORE, { keyPath: 'filename' });
             }
 
+            if (!db.objectStoreNames.contains(this.MANUAL_SYNC_ARCHIVES_STORE)) {
+              db.createObjectStore(this.MANUAL_SYNC_ARCHIVES_STORE, { keyPath: 'id' });
+            }
+
             if (!db.objectStoreNames.contains(this.OUTBOX_STORE)) {
               db.createObjectStore(this.OUTBOX_STORE, { keyPath: 'id' });
             }
@@ -171,7 +185,12 @@ export class DBService {
           const release = () => {
             if (this.db === connection) { this.db = null; this.initialization = null; }
           };
-          connection.onversionchange = () => { connection.close(); release(); };
+          connection.onversionchange = event => {
+            // A cache in use by this tab must not disappear underneath its editor
+            // or worker. A confirmed deletion waits until that tab is closed.
+            if (event.newVersion === null && this === dbService) return;
+            connection.close(); release();
+          };
           connection.onclose = release;
           this.recordOperation(performance.now() - startTime);
           resolve();
@@ -214,6 +233,47 @@ export class DBService {
   async getSyncRepositories() {
     const db = await this.getDb();
     return { saves: new IndexedDbCardSaveRepository(db), outbox: new IndexedDbOutboxRepository(db) };
+  }
+
+  async getManualSyncRepository() {
+    return new IndexedDbManualLocalStorage(await this.getDb());
+  }
+
+  async inspectLocalCache(): Promise<LocalCacheContents> {
+    const db = await this.getDb();
+    const filenames = new Set<string>();
+    const result: LocalCacheContents = { notes: 0, drafts: 0, pendingOperations: 0, historicalOperations: 0, archives: 0 };
+    await runIndexedDbTransaction(db, ['cards', 'markdownDocuments', 'localMarkdownSnapshots', 'outbox', 'syncQueue', 'manualSyncArchives'], 'readonly', tx => {
+      const cards = tx.objectStore('cards').getAll();
+      cards.onsuccess = () => { for (const card of cards.result) filenames.add(card.filename ?? card.meta.id); };
+      for (const name of ['markdownDocuments', 'localMarkdownSnapshots']) {
+        const records = tx.objectStore(name).getAll();
+        records.onsuccess = () => {
+          for (const row of records.result) filenames.add(row.filename);
+          if (name === 'localMarkdownSnapshots') result.drafts = records.result.length;
+        };
+      }
+      const operations = tx.objectStore('outbox').getAll();
+      operations.onsuccess = () => { result.pendingOperations = operations.result.filter(row => row.state?.status !== 'completed').length; };
+      const historical = tx.objectStore('syncQueue').count();
+      historical.onsuccess = () => { result.historicalOperations = historical.result; };
+      const archives = tx.objectStore('manualSyncArchives').count();
+      archives.onsuccess = () => { result.archives = archives.result; };
+    });
+    result.notes = filenames.size;
+    return result;
+  }
+
+  deleteLocalCache(onblocked: () => void): Promise<void> {
+    if (this === dbService) return Promise.reject(new Error('The current cache cannot be deleted'));
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(this.databaseName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      // deleteDatabase cannot be cancelled. Keep waiting instead of reporting a
+      // failure while a queued deletion can still succeed later.
+      request.onblocked = onblocked;
+    });
   }
 
   // Utility function to handle database operations with retry logic
@@ -523,7 +583,7 @@ export class DBService {
       return await this.executeWithRetry(async () => {
         const db = await this.getDb();
         const stores = [this.CARDS_STORE, this.FILES_STORE, this.SYNC_QUEUE_STORE,
-          this.MARKDOWN_DOCUMENTS_STORE, this.LOCAL_MARKDOWN_SNAPSHOTS_STORE, this.OUTBOX_STORE];
+          this.MARKDOWN_DOCUMENTS_STORE, this.LOCAL_MARKDOWN_SNAPSHOTS_STORE, this.OUTBOX_STORE, this.MANUAL_SYNC_ARCHIVES_STORE];
         const transaction = db.transaction(stores, 'readwrite');
 
         return new Promise((resolve, reject) => {
@@ -545,4 +605,6 @@ export class DBService {
 }
 
 // Export singleton instance
-export const dbService = new DBService();
+export const initialDatabase = new DBService();
+export let dbService = initialDatabase;
+export function bindDatabase(database: DBService): void { dbService = database; }

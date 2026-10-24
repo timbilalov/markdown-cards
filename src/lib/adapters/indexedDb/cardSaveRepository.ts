@@ -7,7 +7,7 @@ import type {
 import type { StoredMarkdownSource } from '../../ports/markdownSourceRepository';
 import { runIndexedDbTransaction } from './transaction';
 
-// Borrow an open v5 connection. Opening/upgrading/closing remain the owner's responsibility.
+// Borrow an open connection. Opening/upgrading/closing remain the owner's responsibility.
 export class IndexedDbCardSaveRepository implements CardSaveRepository {
   constructor(private readonly database: IDBDatabase) {}
 

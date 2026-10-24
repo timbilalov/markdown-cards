@@ -6,4 +6,4 @@
   NPM_VERSION = "11.19.0"
   # Non-secret settings can match examples and source when marked as secrets.
   # Keep credential scanning enabled and ignore only these known false positives.
-  SECRETS_SCAN_OMIT_KEYS = "ADMIN_USERNAME,CLOUD_STORAGE_PROVIDER,AWS_LAMBDA_JS_RUNTIME"
+  SECRETS_SCAN_OMIT_KEYS = "ADMIN_USERNAME,CLOUD_STORAGE_ACTIVE,AWS_LAMBDA_JS_RUNTIME"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryCloudStorage } from '../adapters/memoryCloudStorage';
+import { MemoryCloudStorage } from './helpers/memoryCloudStorage';
 import type { CloudStoragePort } from '../ports/cloudStorage';
 
 const original = { path: 'note.md', source: 'before', revision: 'base' };

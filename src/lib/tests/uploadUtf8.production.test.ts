@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { productionStorageContext,productionFileRequests } from './helpers/productionHttp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createProductionHttp, productionCredentials, productionOrigin as origin,
@@ -39,7 +40,7 @@ function malformedBody(field: 'path' | 'content', invalidBytes: readonly number[
 beforeAll(async () => {
   server = await createProductionHttp();
   const login = await server.request({ url: `${origin}/api/auth/login`, method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
   expect(login.status).toBe(200);
   cookie = readAuthCookie(login);
 }, 90_000);
@@ -48,7 +49,7 @@ afterAll(async () => { await server?.close(); });
 
 async function upload(body: Uint8Array, headers: Record<string, string> = {}) {
   return server!.request({ url: `${origin}/api/cloud/upload`, method: 'POST',
-    headers: { Origin: origin, Cookie: cookie, 'Content-Type': contentType, ...headers },
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, Cookie: cookie, 'Content-Type': contentType, ...headers },
     bodyBytes: Array.from(body) });
 }
 
@@ -79,7 +80,7 @@ describe('strict multipart UTF-8 through the generated production entry', () => 
     expect.soft(response.status).toBe(400);
     expect.soft(response.headers['content-type']).toContain('application/json');
     expect.soft(response.text).toBe(JSON.stringify({ success: false, error: 'INVALID_REQUEST_BODY' }));
-    expect.soft(response.effects).toEqual({ requests: [], writes: [], remote: initialRemote, unexpected: [], databaseOpens: 0 });
+    expect.soft({...response.effects,requests:productionFileRequests(response)}).toEqual({ requests: [], writes: [], remote: initialRemote, unexpected: [], databaseOpens: 0 });
     expect(response.headers['cache-control']).toBe('private, no-store');
     expect(response.headers.location).toBeUndefined();
     expect(response.cookies).toEqual([]);
@@ -92,11 +93,11 @@ describe('strict multipart UTF-8 through the generated production entry', () => 
     expect(retry.text).toBe('File uploaded successfully');
     expect(retry.effects.writes).toEqual([{ path: `md-cards/${filename}`, source: validSource, overwrite: true }]);
     expect(retry.effects.remote).toEqual({ [`md-cards/${filename}`]: validSource });
-    expect(retry.effects.requests).toHaveLength(2);
+    expect(productionFileRequests(retry)).toHaveLength(2);
     expect(retry.effects.unexpected).toEqual([]);
     expect(retry.effects.databaseOpens).toBe(0);
     const read = await server!.request({ url: `${origin}/api/cloud/download?path=${encodeURIComponent(filename)}`,
-      headers: { Cookie: cookie } });
+      headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie } });
     expect(read.status).toBe(200);
     expect(read.text).toBe(validSource);
     expect(read.effects.writes).toEqual(retry.effects.writes);

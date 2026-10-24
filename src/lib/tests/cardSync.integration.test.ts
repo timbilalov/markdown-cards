@@ -317,3 +317,16 @@ describe('independent files and late reads', () => {
     expect(await loading).toMatchObject({ source: latest, origin: 'local', baseSource: latest });
   });
 });
+it.each([null, 'base'])('uses atomic preflight revision when the cached base revision is %j', async revision => {
+ deps.cloud.getCapabilities = () => ({revisions:true,conditionalCreate:true,conditionalUpdate:true});
+ readResult = {status:'found',document:{path,source:'original exact legacy source',revision:'base'}};
+ expect(await sync.save(path,document,{base:{kind:'present',revision},baseSource:base().baseSource})).toMatchObject({status:'synced'});
+ expect(writes).toEqual([{path,source:v1,createOnly:false,expectedRevision:'base'}]);
+});
+it.each([null, 'base'])('retains the draft when atomic preflight revision changes during upload (cached=%j)', async revision => {
+ deps.cloud.getCapabilities = () => ({revisions:true,conditionalCreate:true,conditionalUpdate:true});
+ readResult = {status:'found',document:{path,source:'original exact legacy source',revision:'base'}};
+ deps.cloud.write = async request => request.expectedRevision === 'base' ? {status:'conflict'} : {status:'written',revision:'overwritten'};
+ expect(await sync.save(path,document,{base:{kind:'present',revision},baseSource:base().baseSource})).toMatchObject({status:'conflict',savedLocally:true});
+ expect((await deps.saves.readCurrent(path)).draft?.source).toBe(v1);
+});

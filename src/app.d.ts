@@ -3,7 +3,7 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals { cloudStorage?: import('./lib/ports/cloudStorage').CloudStoragePort }
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}

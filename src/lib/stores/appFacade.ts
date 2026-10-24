@@ -1,3 +1,6 @@
+import { prepareStorageSync,runStorageSync,readManualSyncState,verifyManualSync,dismissManualSync } from '../services/manualStorageSync';
+import { loadStorageComparison } from '../services/storageManagement';
+import { readLocalCaches,deleteLocalCache } from '../services/localCacheManagement';
 import { get } from 'svelte/store';
 import { appState } from './appState';
 import { startApplication, initializeApplication } from '../services/appLifecycle';
@@ -10,6 +13,9 @@ import * as editor from './cardStore';
 // for editor form bindings; storage and delivery decisions belong to use cases.
 export const app = {
   state: appState,
+  loadStorageComparison,
+  readLocalCaches,deleteLocalCache,
+  prepareStorageSync,runStorageSync,readManualSyncState,verifyManualSync,dismissManualSync,
   start: startApplication,
   initialize: initializeApplication,
   async loadBoard(publish: (state: BoardLoadState) => void, signal: AbortSignal): Promise<void> {

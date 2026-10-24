@@ -1,3 +1,4 @@
+import { initializeTestStorage, currentTestDatabaseName } from './helpers/browserStorageContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { mockCardDocumentHttp, documentSlug, documentFilename } from './helpers/cardDocumentHttp';
@@ -9,13 +10,14 @@ let cards: typeof import('../stores/cardStore');
 let db: typeof import('../services/dbService')['dbService'];
 let http: ReturnType<typeof mockCardDocumentHttp>;
 beforeEach(async () => {
-  vi.resetModules(); http = mockCardDocumentHttp(v1);
+  vi.resetModules(); http = mockCardDocumentHttp(v1); await initializeTestStorage(http.http);
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   cards = await import('../stores/cardStore'); db = (await import('../services/dbService')).dbService;
 });
 async function outbox() {
+  const databaseName=await currentTestDatabaseName();
   const connection = await new Promise<IDBDatabase>(resolve => {
-    const request = indexedDB.open('MarkdownCardsDB'); request.onsuccess = () => resolve(request.result);
+    const request = indexedDB.open(databaseName); request.onsuccess = () => resolve(request.result);
   });
   const rows = await new Promise<unknown[]>(resolve => {
     const tx = connection.transaction('outbox'); const request = tx.objectStore('outbox').getAll();

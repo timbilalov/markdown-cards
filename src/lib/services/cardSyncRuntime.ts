@@ -1,9 +1,11 @@
+import { withSyncOwnership } from './syncOwnership';
 import { CardSync, type SyncStatus } from '../application/cardSync';
 import { BrowserCloudStorage } from '../adapters/browserCloudStorage';
 import { dbService } from './dbService';
 import { sessionDeliverySignal } from '../stores/sessionState';
 
-const cloud = new BrowserCloudStorage();
+import { IndexedDbManualSyncJournal } from '../adapters/indexedDb/manualSyncJournal';
+import { getStorageSession } from './storageSession';
 let workerChannel: BroadcastChannel | null = null;
 const listeners = new Set<() => void>();
 export function subscribeSync(listener: () => void): () => void {
@@ -17,26 +19,29 @@ function notify(): void {
 }
 
 export async function getCardSync(): Promise<CardSync> {
-  const deliverySignal = sessionDeliverySignal();
+  const session = getStorageSession();
+  const database = dbService;
+  const cloud = new BrowserCloudStorage(session?.descriptor ?? undefined);
+  const deliverySignal = session ? AbortSignal.any([sessionDeliverySignal(), session.deliverySignal]) : sessionDeliverySignal();
   // Repositories borrow the current connection; do not retain one across a
   // versionchange/close while DBService is able to reopen it.
-  return dbService.getSyncRepositories().then(repositories => new CardSync({
-    ...repositories, cloud, deliverySignal, readListed: (path, signal) => cloud.readListed(path, signal),
+  return database.getSyncRepositories().then(repositories => new CardSync({
+    ...repositories, cloud, deliverySignal,
+    checkIsDeliveryBlocked: async path => {
+      if (!session?.descriptor) return false;
+      const key = `cloud:${session.descriptor.contextId}`;
+      const canonical = session.descriptor.capabilities.caseSensitivePaths === false ? path.toLowerCase() : path;
+      return (await new IndexedDbManualSyncJournal().list()).some(row => row.targetKey === key && row.pathKey === canonical);
+    }, readListed: (path, signal) => cloud.readListed(path, signal),
     onChange: () => { notify(); workerChannel?.postMessage('changed'); },
-    readCards: () => dbService.getAllCards(),
+    readCards: () => database.getAllCards(),
     readSource: async filename => {
-      const cached = await dbService.getMarkdownDocument(filename);
+      const cached = await database.getMarkdownDocument(filename);
       return cached?.result.status === 'success' ? cached.result.document.source : cached?.result.source ?? null;
     },
-    refresh: input => dbService.refreshMarkdownCache(input),
+    refresh: input => database.refreshMarkdownCache(input),
     now: () => Date.now(), newId: () => crypto.randomUUID(), checkIsOnline: () => navigator.onLine,
-    exclusive: async task => {
-      if (!navigator.locks) return null;
-      return navigator.locks.request('markdown-cards-sync', { ifAvailable: true, mode: 'exclusive' }, async lock => {
-        if (!lock) return false;
-        await task(); return true;
-      });
-    }
+    exclusive: withSyncOwnership
   }));
 }
 
@@ -70,19 +75,20 @@ export function startCardSyncWorker(): () => void {
 }
 
 export function describeSyncStatus(status: SyncStatus): string {
+  const label=getStorageSession()?.descriptor?.label??'Яндекс Диск';
   switch (status) {
-    case 'superseded': return 'Эту версию заменила другая локальная версия. Её запись на Диск не подтверждена.';
-    case 'synced': return 'Сохранено на Яндекс Диске.';
+    case 'superseded': return 'Эту версию заменила другая локальная версия. Её запись в облако не подтверждена.';
+    case 'synced': return `Сохранено в хранилище «${label}».`;
     case 'pending': case 'offline': return 'Сохранено локально, ожидает синхронизации.';
-    case 'unauthorized': return 'Сохранено локально, но не на Диске. Войдите в аккаунт и повторите синхронизацию.';
-    case 'conflict': return 'Сохранено локально, но не на Диске: конфликт с удалённой версией. Автоматическая перезапись остановлена.';
-    case 'uncertain': return 'Сохранено локально; результат записи на Диск неизвестен. Автоматический повтор остановлен, проверьте файл на Диске.';
-    case 'legacy': return 'Старая локальная версия сохранена; сохранение на Диске не подтверждено. Для неё нет надёжной базы сравнения; автоматическая отправка заблокирована.';
+    case 'unauthorized': return 'Сохранено локально, но не в облаке. Войдите в аккаунт и повторите синхронизацию.';
+    case 'conflict': return 'Сохранено локально, но не в облаке: конфликт с удалённой версией. Автоматическая перезапись остановлена.';
+    case 'uncertain': return 'Сохранено локально; результат записи в облако неизвестен. Автоматический повтор остановлен, проверьте файл в облаке.';
+    case 'legacy': return 'Старая локальная версия сохранена; сохранение в облаке не подтверждено. Для неё нет надёжной базы сравнения; автоматическая отправка заблокирована.';
     case 'ownership-unavailable': return 'Сохранено локально. Для синхронизации нужен браузер с поддержкой Web Locks.';
     case 'storage-error': return 'Ошибка локального хранилища. Подтверждение сохранения недоступно.';
-    case 'not-found': return 'Заметка не найдена на Диске.';
-    case 'validation-error': return 'Некорректный документ. Отправка на Диск заблокирована.';
+    case 'not-found': return 'Заметка не найдена в облаке.';
+    case 'validation-error': return 'Некорректный документ. Отправка в облако заблокирована.';
     case 'write-unsupported': return 'Сохранено локально. Провайдер не поддерживает требуемую безопасную запись; отправка недоступна.';
-    case 'remote-unavailable': return 'Сохранено локально, но не на Диске. Сервис недоступен; повторим синхронизацию позже.';
+    case 'remote-unavailable': return 'Сохранено локально, но не в облаке. Сервис недоступен; повторим синхронизацию позже.';
   }
 }

@@ -1,11 +1,14 @@
+import { mockHttp } from './helpers/http';
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 // @vitest-environment node
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { RequestEvent } from '@sveltejs/kit';
 import { runHandle } from './helpers/serverRequest';
 
-vi.mock('$env/dynamic/private', () => ({ env: { SESSION_SECRET: '99'.repeat(32) } }));
+vi.mock('$env/dynamic/private', () => ({ env: { SESSION_SECRET: '99'.repeat(32), CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'fixture-token', rootPath: 'md-cards' }]) } }));
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
+let http: ReturnType<typeof mockHttp>;
 let handle: typeof import('../../hooks.server')['handle'];
 let token: string;
 let openDatabase: ReturnType<typeof vi.spyOn>;
@@ -21,7 +24,7 @@ const staleHeaders = {
 };
 
 beforeEach(async () => {
-  vi.resetModules();
+  vi.resetModules(); http=mockHttp(); mockStorageIdentity(http);
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
   vi.stubEnv('NODE_ENV', 'production');
@@ -31,7 +34,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  expect(fetch).not.toHaveBeenCalled();
+  http.assertHandled(); expect(fileRequests(http)).toEqual([]);
   expect(openDatabase).not.toHaveBeenCalled();
 });
 
@@ -39,7 +42,7 @@ function event(path: string, options: { method?: string; auth?: boolean; routeId
   const url = new URL(path, options.base ?? origin);
   const method = options.method ?? 'GET';
   return {
-    url, request: new Request(url, { method, headers: { Origin: url.origin } }),
+    url, request: new Request(url, { method, headers: { Origin: url.origin, 'X-Storage-Context': fixtureStorageContext() } }),
     cookies: { get: vi.fn(name => name === 'auth_token' && options.auth !== false ? token : undefined) },
     route: { id: options.routeId === undefined ? url.pathname : options.routeId },
     params: {}, locals: {}, getClientAddress: () => '198.18.1.1'

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { MemoryCloudStorage } from '../adapters/memoryCloudStorage';
+import { MemoryCloudStorage } from './helpers/memoryCloudStorage';
 import type { CloudStorageCapabilities } from '../ports/cloudStorage';
 import { defineCloudStorageContract } from './contracts/cloudStorage.contract';
 

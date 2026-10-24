@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { productionStorageContext,productionFileRequests } from './helpers/productionHttp';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createProductionHttp, productionOrigin as origin, productionCredentials,
   readAuthCookie, type ProductionResponse } from './helpers/productionHttp';
@@ -14,7 +15,7 @@ const initialRemote = { 'md-cards/existing-note.md': source };
 beforeAll(async () => {
   server = await createProductionHttp();
   const login = await server.request({ url: `${origin}/api/auth/login`, method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
   expect(login.status).toBe(200);
   cookie = readAuthCookie(login);
 }, 90_000);
@@ -43,7 +44,7 @@ function expectNoWrites(response: ProductionResponse) {
 
 async function get(path: string, method = 'GET', extraHeaders: Record<string, string> = {}) {
   return server.request({ url: `${origin}${path}`, method,
-    headers: { Cookie: cookie, ...extraHeaders } });
+    headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie, ...extraHeaders } });
 }
 
 describe('Private cache contract through the built production adapter', () => {
@@ -60,7 +61,7 @@ describe('Private cache contract through the built production adapter', () => {
       expect(data.text).toContain('"type":"data"');
       expectPrivate(data);
       expectNoWrites(page);
-      expect(page.effects.requests).toEqual([]);
+      expect(productionFileRequests(page)).toEqual([]);
       expectPrivate(page);
       expectPrivate(head);
     });
@@ -76,7 +77,7 @@ describe('Private cache contract through the built production adapter', () => {
       expect(retry.headers['content-type']).toContain('text/html');
       expect(retry.text.toLowerCase()).toContain('<!doctype html>');
       expectNoWrites(retry);
-      expect(retry.effects.requests).toEqual([]);
+      expect(productionFileRequests(retry)).toEqual([]);
       expectPrivate(first);
       expectPrivate(retry);
     });
@@ -84,12 +85,12 @@ describe('Private cache contract through the built production adapter', () => {
   it.each([false, true])('protects a successful upload response with overwrite=%s and preserves exact source', async overwrite => {
     const name = overwrite ? 'existing-note.md' : 'new-note.md';
     const response = await server.request({ url: `${origin}/api/cloud/upload`, method: 'POST',
-      headers: { Cookie: cookie, Origin: origin }, form: { path: name, content: uploadSource, overwrite: String(overwrite) } });
+      headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie, Origin: origin }, form: { path: name, content: uploadSource, overwrite: String(overwrite) } });
     expect(response.status).toBe(200);
     expect(response.text).toBe('File uploaded successfully');
     expect(response.effects.writes).toEqual([{ path: `md-cards/${name}`, source: uploadSource, overwrite }]);
     expect(response.effects.remote).toEqual({ ...initialRemote, [`md-cards/${name}`]: uploadSource });
-    expect(response.effects.requests).toHaveLength(2);
+    expect(productionFileRequests(response)).toHaveLength(2);
     expectPrivate(response);
   });
 
@@ -98,10 +99,10 @@ describe('Private cache contract through the built production adapter', () => {
     ['unsupported Markdown', { path: 'existing-note.md', content: '# legacy' }, 422]
   ] as const)('protects upload refusal for %s without touching the remote', async (_name, form, status) => {
     const response = await server.request({ url: `${origin}/api/cloud/upload`, method: 'POST',
-      headers: { Cookie: cookie, Origin: origin }, form });
+      headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie, Origin: origin }, form });
     expect(response.status).toBe(status);
     expectNoWrites(response);
-    expect(response.effects.requests).toEqual([]);
+    expect(productionFileRequests(response)).toEqual([]);
     expectPrivate(response);
   });
 
@@ -115,10 +116,10 @@ describe('Private cache contract through the built production adapter', () => {
     ['/card/existing-note/missing', 'GET', 404]
   ] as const)('protects %s %s status %s from implicit caching', async (path, method, status) => {
     const response = await server.request({ url: `${origin}${path}`, method,
-      headers: { Cookie: cookie, Origin: origin, Accept: 'application/json' } });
+      headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie, Origin: origin, Accept: 'application/json' } });
     expect(response.status).toBe(status);
     expectNoWrites(response);
-    expect(response.effects.requests).toEqual([]);
+    expect(productionFileRequests(response)).toEqual([]);
     expectPrivate(response);
   });
 
@@ -130,18 +131,17 @@ describe('Private cache contract through the built production adapter', () => {
     expect(page.status).toBe(200);
     expect(JSON.parse(list.text)).toEqual({ _embedded: { items: [{ name: 'existing-note.md', path: 'existing-note.md' }] } });
     expect(legacyList.status).toBe(404);
-    // Response.text follows native BOM decoding; the read adapter's byte-level
-    // preservation remains covered by the existing download workflow tests.
+    // The production worker decodes response bytes without stripping the BOM.
     expect(download.status).toBe(200);
-    expect(download.text).toBe(source.slice(1));
+    expect(download.text).toBe(source);
     expectPrivate(list);
     expectPrivate(legacyList);
     expectPrivate(download);
-    expect(download.effects.requests).toHaveLength(3);
+    expect(productionFileRequests(download)).toHaveLength(3);
     expectNoWrites(download);
 
     const logout = await server.request({ url: `${origin}/api/auth/logout`, method: 'POST',
-      headers: { Cookie: cookie, Origin: origin } });
+      headers: { 'X-Storage-Context': productionStorageContext, Cookie: cookie, Origin: origin } });
     expect(logout.status).toBe(200);
     expect(logout.cookies.every(value => value.includes('Max-Age=0'))).toBe(true);
     // Model the browser applying the cleared cookies, not revocation of a copied token.
@@ -156,7 +156,7 @@ describe('Private cache contract through the built production adapter', () => {
     for (const response of [logout, denied, redirected, redirectedData]) {
       expectPrivate(response);
       expectNoWrites(response);
-      expect(response.effects.requests).toEqual(download.effects.requests);
+      expect(productionFileRequests(response)).toEqual(productionFileRequests(download));
     }
     expectPrivate(page);
   });

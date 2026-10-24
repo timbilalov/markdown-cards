@@ -105,7 +105,7 @@ describe('new note: v1 creation through the actual editor page', () => {
     await saveThroughUI();
 
     expect(remote.uploads).toEqual([{ path: `${id}.md`, content: expectedMinimal(id), overwrite: 'false' }]);
-    expect(target.querySelector('[role="status"]')?.textContent).toEqual(expect.stringMatching(/сохранено.*Диске/i));
+    expect(target.querySelector('[role="status"]')?.textContent).toEqual(expect.stringMatching(/сохранено.*Яндекс Диск/i));
     cards.cardStore.update(card => card && { ...card, title: 'Вторая редакция' });
     runtime.flushSync();
     await saveThroughUI();

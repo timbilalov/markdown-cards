@@ -1,3 +1,4 @@
+import { initializeTestStorage, currentTestDatabaseName } from './helpers/browserStorageContext';
 import { historicalStorage } from './helpers/historicalStorage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLegacyClientToken } from './helpers/legacyClientConfiguration';
@@ -24,6 +25,7 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(NOW);
   remote = mockMarkdownReadHttp([{ file: makeReadFile(), source: futureV1Shape }]);
+  await initializeTestStorage(remote.http);
   runtime = await import('svelte');
   db = (await import('../services/dbService')).dbService;
   await db.saveCard(local);

@@ -6,7 +6,7 @@ import type {
   CloudStoragePort,
   CloudWriteRequest,
   CloudWriteResult
-} from '../ports/cloudStorage';
+} from '../../ports/cloudStorage';
 
 export interface MemoryCloudStorageOptions {
   documents?: readonly CloudDocument[];
@@ -21,9 +21,12 @@ export class MemoryCloudStorage implements CloudStoragePort {
   private revisionSequence = 0;
 
   constructor(options: MemoryCloudStorageOptions = {}) {
-    this.capabilities = { ...(options.capabilities ?? {
-      revisions: true, conditionalCreate: true
-    }) };
+    this.capabilities = {
+      ...(options.capabilities ?? {
+        revisions: true,
+        conditionalCreate: true
+      })
+    };
     for (const document of options.documents ?? []) {
       const revision = this.capabilities.revisions ? document.revision : null;
       this.documents.set(document.path, { ...document, revision });
@@ -47,13 +50,26 @@ export class MemoryCloudStorage implements CloudStoragePort {
     return document ? { status: 'found', document: { ...document } } : { status: 'not-found' };
   }
 
-  async write({ path, source, createOnly }: CloudWriteRequest): Promise<CloudWriteResult> {
+  async write({
+    path,
+    source,
+    createOnly,
+    expectedRevision
+  }: CloudWriteRequest): Promise<CloudWriteResult> {
     if (createOnly !== undefined && typeof createOnly !== 'boolean') {
       return { status: 'invalid', reason: 'invalid-create-only' };
     }
+    if (expectedRevision !== undefined) {
+      if (!this.capabilities.conditionalUpdate)
+        return { status: 'unsupported', operation: 'conditional-update' };
+      if (createOnly || typeof expectedRevision !== 'string' || !expectedRevision)
+        return { status: 'invalid', reason: 'invalid-revision' };
+      if (this.documents.get(path)?.revision !== expectedRevision) return { status: 'conflict' };
+    }
     // No await between checking absence and storing on this instance.
     if (createOnly === true) {
-      if (!this.capabilities.conditionalCreate) return { status: 'unsupported', operation: 'create-only' };
+      if (!this.capabilities.conditionalCreate)
+        return { status: 'unsupported', operation: 'create-only' };
       if (this.documents.has(path)) return { status: 'conflict' };
     }
 

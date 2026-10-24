@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { productionStorageContext,productionFileRequests } from './helpers/productionHttp';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createProductionHttp, productionCredentials, readAuthCookie, type ProductionResponse } from './helpers/productionHttp';
 import { inputSource } from './helpers/requestBodyFixtures';
@@ -12,7 +13,7 @@ let cookie: string;
 beforeAll(async () => {
   server = await createProductionHttp();
   const login = await server.request({ url: `${origin}/api/auth/login`, method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(productionCredentials) });
   expect(login.status).toBe(200);
   cookie = readAuthCookie(login);
 }, 90_000);
@@ -35,7 +36,7 @@ function expectPrivate(response: ProductionResponse) {
 
 function expectNoEffects(response: ProductionResponse) {
   expect(response.cookies).toEqual([]);
-  expect(response.effects.requests).toEqual([]);
+  expect(productionFileRequests(response)).toEqual([]);
   expect(response.effects.writes).toEqual([]);
   expect(response.effects.remote).toEqual(initialUploadRemote);
   expect(response.effects.databaseOpens).toBe(0);
@@ -45,7 +46,7 @@ function expectNoEffects(response: ProductionResponse) {
 async function send(fields: readonly UploadField[], overrides: Record<string, string> = {}) {
   const { body, contentType } = await productionUploadBody(fields);
   return server.request({ url: `${origin}/api/cloud/upload`, method: 'POST',
-    headers: { Origin: origin, Cookie: cookie, 'Content-Type': contentType, ...overrides }, body });
+    headers: { 'X-Storage-Context': productionStorageContext, Origin: origin, Cookie: cookie, 'Content-Type': contentType, ...overrides }, body });
 }
 
 function expectRefusal(response: ProductionResponse, error: string) {
@@ -63,10 +64,10 @@ async function expectValidRetry(filename = unicodeFilename, overwrite: string | 
   expectPrivate(response);
   expect(response.effects.writes).toEqual([{ path: `md-cards/${filename}`, source: inputSource, overwrite: overwrite === 'true' }]);
   expect(response.effects.remote).toEqual({ ...initialUploadRemote, [`md-cards/${filename}`]: inputSource });
-  expect(response.effects.requests).toHaveLength(2);
+  expect(productionFileRequests(response)).toHaveLength(2);
   const legacyApi = `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(`md-cards/${filename}`)}&overwrite=${overwrite === 'true'}`;
   expect([legacyApi, adapterUploadUrl(legacyApi)].map(url => ({ method: 'GET', url })))
-    .toContainEqual(response.effects.requests[0]);
+    .toContainEqual(productionFileRequests(response)[0]);
 }
 
 describe('upload field and filename validation through the generated production entry', () => {

@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { isAuthenticated } from '$lib/stores/cloudStore';
+  import { currentStorageSession } from '$lib/services/storageSession';
   import { app } from '$lib/stores/appFacade';
 
   let username = 'User';
@@ -59,6 +60,8 @@
 
       <div class="navbar-menu" class:is-active={menuOpen} id="navbar-menu">
         <div class="navbar-start">
+          {#if $isAuthenticated}<a class="navbar-item" href="/storages">Хранилища</a>
+          {#if $currentStorageSession?.descriptor}<span class="navbar-item">{$currentStorageSession.descriptor.label}</span>{/if}{/if}
         </div>
 
         <div class="navbar-end">
@@ -95,6 +98,9 @@
       </div>
     </div>
   </nav>
+  {#if $isAuthenticated && $currentStorageSession && !$currentStorageSession.verified}
+    <p role="alert" class="notification is-warning">Подключение хранилища не подтверждено. Доступен локальный кеш; доставка остановлена. Перезагрузите страницу для повторной проверки.</p>
+  {/if}
 </header>
 
 <style>

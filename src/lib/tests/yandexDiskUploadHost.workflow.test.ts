@@ -1,3 +1,4 @@
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 import { installWebLocks } from './helpers/webLocks';
 import { readUploadContent } from './helpers/uploadContent';
 // @vitest-environment node
@@ -11,8 +12,7 @@ import legacy from './fixtures/migration-legacy.md?raw';
 
 vi.mock('$app/environment', () => ({ browser: true }));
 vi.mock('$env/dynamic/private', () => ({ env: {
-  SESSION_SECRET: 'ab'.repeat(32), CLOUD_STORAGE_PROVIDER: 'yandex',
-  YANDEX_DISK_TOKEN: 'upload-host-test-token', YANDEX_DISK_BASE_PATH: 'test-notes'
+  SESSION_SECRET: 'ab'.repeat(32), CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'upload-host-test-token', rootPath: 'test-notes' }])
 } }));
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.stubGlobal('window', new EventTarget());
   vi.stubGlobal('navigator', { onLine: true });
   vi.stubEnv('VITE_YANDEX_DISK_TOKEN', '');
-  installWebLocks(); http = mockHttp({ authenticated: true });
+  installWebLocks(); http = mockHttp({ authenticated: true }); mockStorageIdentity(http, 'test-notes');
 });
 afterEach(() => http.assertHandled());
 
@@ -52,7 +52,7 @@ describe('Yandex Disk upload links from the disk.yandex.net host family', () => 
 
     expect(await adapter.write({ path: `${filename}.md`, source, createOnly }))
       .toEqual({ status: 'written', revision: null });
-    expect(http.fetch).toHaveBeenCalledTimes(2);
+    expect(fileRequests(http)).toHaveLength(2);
     expect(http.fetch).toHaveBeenNthCalledWith(1, apiUrl, {
       method: 'GET', signal: expect.any(AbortSignal), redirect: 'error',
       headers: { Accept: 'application/json', Authorization: `OAuth ${token}` }
@@ -84,7 +84,7 @@ describe('Yandex Disk upload links from the disk.yandex.net host family', () => 
       return new Response(null, { status: 201 });
     });
     http.on('POST', '/api/cloud/upload', async init => {
-      const request = new Request(`${origin}/api/cloud/upload`, { ...init, headers: { Origin: origin } });
+      const request = new Request(`${origin}/api/cloud/upload`, { ...init, headers: { Origin: origin, 'X-Storage-Context': fixtureStorageContext('test-notes') } });
       submitted = await request.clone().formData();
       const event = { request, url: new URL(request.url), params: {}, locals: {},
         route: { id: '/api/cloud/upload' },
@@ -111,7 +111,7 @@ describe('Yandex Disk upload links from the disk.yandex.net host family', () => 
     expect(await dbService.getLocalMarkdownSnapshot(filename)).toBeNull();
     expect(get(cards.cardDocument)).toMatchObject({ saveMode: 'update' });
     expect(get(cards.cardSaveError)).toBeNull();
-    expect(get(cards.cardSaveMessage)).toMatch(/сохранено.*Диске/i);
+    expect(get(cards.cardSaveMessage)).toMatch(/сохранено.*Яндекс Диск/i);
     const uploads = http.fetch.mock.calls.filter(([url]) => url === href);
     expect(uploads).toHaveLength(1);
     expect(uploads[0][1]?.redirect).toBe('error');

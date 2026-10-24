@@ -4,6 +4,10 @@ import type { Handle, RequestEvent } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/session';
 import logger from '$lib/utils/logger';
 
+import { env } from '$env/dynamic/private';
+import { resolveStorageConnections } from '$lib/server/cloud/storageConnections';
+import { checkIsStorageContextId } from '$lib/utils/storageValidation';
+
 // In-memory store for rate limiting
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 
@@ -127,6 +131,34 @@ const csrfMiddleware: Handle = ({ event, resolve }) => {
   return resolve(event);
 };
 
+// A session authenticates the user, not the destination of an old tab's queue.
+// Resolve once and bind this exact port for the whole request, before its body.
+const storageContextMiddleware: Handle = async ({ event, resolve }) => {
+  const management = event.url.pathname.startsWith('/api/storages/');
+  if (!management && !event.url.pathname.startsWith('/api/cloud/')) return resolve(event);
+  const refuse = (error: string, status: number) =>
+    json({ success: false, error, outcome: 'not-written' }, { status });
+  const expected = event.request.headers.get('X-Storage-Context');
+  if (!checkIsStorageContextId(expected)) return refuse('CLOUD_CONTEXT_MISMATCH', 409);
+  try {
+    const selectedId = management ? event.params.storageId : undefined;
+    const connections = await resolveStorageConnections(
+      env,
+      management ? new Set(selectedId ? [selectedId] : []) : true
+    );
+    const connection = connections.storages.find(
+      entry => entry.id === (management ? selectedId : connections.activeStorageId)
+    );
+    if (management && !connection) return refuse('CLOUD_CONTEXT_MISMATCH', 409);
+    if (!connection?.descriptor) return refuse('CLOUD_UNAVAILABLE', 503);
+    if (connection.descriptor.contextId !== expected) return refuse('CLOUD_CONTEXT_MISMATCH', 409);
+    event.locals.cloudStorage = connection.storage;
+    return resolve(event);
+  } catch {
+    return refuse('CLOUD_NOT_CONFIGURED', 503);
+  }
+};
+
 // HTTPS enforcement middleware
 const httpsMiddleware: Handle = ({ event, resolve }) => {
   const protocol = event.url.protocol;
@@ -197,5 +229,6 @@ export const handle = sequence(
   securityHeadersMiddleware,
   httpsMiddleware,
   authMiddleware,
-  csrfMiddleware
+  csrfMiddleware,
+  storageContextMiddleware
 );

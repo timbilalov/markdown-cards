@@ -17,10 +17,13 @@ export interface CloudDocument extends CloudEntry {
   source: string;
 }
 
-// Revisions are read/write metadata; this port does not compare them before write.
+// expectedRevision requires atomic revision equality; unsupported adapters must
+// refuse it without silently falling back to an unconditional write.
 export interface CloudStorageCapabilities {
   revisions: boolean;
   conditionalCreate: boolean;
+  conditionalUpdate?: boolean;
+  caseSensitivePaths?: boolean;
 }
 
 export type CloudUnavailableReason = 'auth' | 'network' | 'remote' | 'invalid-response';
@@ -39,13 +42,14 @@ export interface CloudWriteRequest {
   source: string;
   // Omitted/false creates or replaces; true refuses an existing path.
   createOnly?: boolean;
+  expectedRevision?: RemoteRevision;
 }
 
 export type CloudWriteResult =
   | { status: 'written'; revision: RemoteRevision | null }
   | { status: 'conflict' }
-  | { status: 'unsupported'; operation: 'create-only' }
-  | { status: 'invalid'; reason: 'invalid-create-only' | 'invalid-path' | 'invalid-source' }
+  | { status: 'unsupported'; operation: 'create-only' | 'conditional-update' }
+  | { status: 'invalid'; reason: 'invalid-create-only' | 'invalid-path' | 'invalid-source' | 'invalid-revision' }
   // A lost response may follow a committed write. Never infer absence/success.
   | (CloudUnavailable & { outcome: 'not-written' | 'unknown' });
 

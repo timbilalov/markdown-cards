@@ -1,3 +1,4 @@
+import { configuredCloudLocals, yandexEnvironment } from './helpers/configuredCloud';
 // @vitest-environment node
 import { onCloudUpload, uploadLinkCalls } from './helpers/cloudUploadHttp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +7,7 @@ import { mockHttp } from './helpers/http';
 import { rejectedMarkdown, v1 } from './helpers/markdownReadFixtures';
 import legacy from './fixtures/migration-legacy.md?raw';
 
-vi.mock('$env/dynamic/private', () => ({ env: { CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: 'test-only-token', YANDEX_DISK_BASE_PATH: 'md-cards' } }));
+vi.mock('$env/dynamic/private', () => ({ env: { CLOUD_STORAGE_ACTIVE: 'yandex', CLOUD_STORAGES: JSON.stringify([{ id: 'yandex', label: 'Яндекс Диск', provider: 'yandex', accessToken: 'test-only-token', rootPath: 'md-cards' }]) } }));
 
 const existingFilename = 'renamed-note.md'; // Deliberately differs from meta.id.
 const originalSource = 'Existing remote source — keep it intact';
@@ -29,7 +30,7 @@ let uploads: { filename: string; source: string; overwrite: boolean }[];
 function event(request: Request): RequestEvent {
   // Only SvelteKit request plumbing is substituted; handlers/services stay real.
   return {
-    request, url: new URL(request.url), params: {}, locals: {},
+    request, url: new URL(request.url), params: {}, locals: configuredCloudLocals(yandexEnvironment('test-only-token', 'md-cards')),
     getClientAddress: () => '127.0.0.1'
   } as unknown as RequestEvent;
 }

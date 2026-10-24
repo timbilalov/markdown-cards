@@ -1,3 +1,5 @@
+import { yandexEnvironment, configuredCloudLocals } from './helpers/configuredCloud';
+import { mockStorageIdentity, fixtureStorageContext, fileRequests } from './helpers/storageIdentityHttp';
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestEvent } from '@sveltejs/kit';
@@ -22,7 +24,7 @@ const token = 'download-private-test-token';
 const root = 'notes/Мои карточки';
 const filename = 'renamed.md.note.md'; // Deliberately differs from the Card ID.
 const href = 'https://downloader.disk.yandex.ru/disk/test-source?signature=test-only';
-const settings = { CLOUD_STORAGE_PROVIDER: 'yandex', YANDEX_DISK_TOKEN: token, YANDEX_DISK_BASE_PATH: root, SESSION_SECRET: '22'.repeat(32) };
+const settings = { ...yandexEnvironment(token, root), SESSION_SECRET: '22'.repeat(32) };
 let http: ReturnType<typeof mockHttp>;
 let openDatabase: ReturnType<typeof vi.spyOn>;
 
@@ -34,7 +36,7 @@ function apiUrl(path = filename, folder = root): string {
 function event(query: string): RequestEvent {
   const url = new URL(`/api/cloud/download${query}`, 'https://app.example.invalid');
   return {
-    request: new Request(url), url, params: {}, locals: {},
+    request: new Request(url), url, params: {}, locals: configuredCloudLocals(privateEnvironment.values),
     cookies: { get: (name: string) => name === 'auth_token' ? issueSession('test-user').token : undefined, set: vi.fn() },
     getClientAddress: () => '127.0.0.1', route: { id: '/api/cloud/download' }
   } as unknown as RequestEvent;
@@ -110,7 +112,7 @@ describe('GET /api/cloud/download: exact document through the private cloud port
     serve(legacy);
     await expectSource(await resolveDownload(event(query())), legacy);
     const nextRoot = 'next-notes';
-    privateEnvironment.values = { ...settings, YANDEX_DISK_BASE_PATH: nextRoot, YANDEX_DISK_TOKEN: 'next-test-token' };
+    privateEnvironment.values = { ...settings, ...yandexEnvironment('next-test-token', nextRoot) };
     serve(v1, filename, nextRoot);
     await expectSource(await resolveDownload(event(query())), v1);
     expect(http.fetch.mock.calls.map(([url]) => String(url))).toEqual([apiUrl(), href, apiUrl(filename, nextRoot), href]);
@@ -135,12 +137,12 @@ describe('GET /api/cloud/download: filename validation and URL refusal', () => {
     const foreignUrl = 'https://example.invalid/file?next=disk.yandex.ru';
     // Allow the old attack to succeed: RED must expose the leak, not a mock error.
     http.on('GET', foreignUrl, () => new Response('private test document'));
+    mockStorageIdentity(http,root);
     const { handle } = await import('../../hooks.server');
-    const response = await runHandle(handle, {
-      event: event(`?url=${encodeURIComponent(foreignUrl)}`), resolve: resolveDownload
-    });
+    const input=event(`?url=${encodeURIComponent(foreignUrl)}`); input.request.headers.set('X-Storage-Context',fixtureStorageContext(root));
+    const response = await runHandle(handle, { event:input, resolve:resolveDownload });
     await expectError(response, 400, 'CLOUD_INVALID_PATH');
-    expect(http.fetch).not.toHaveBeenCalled();
+    expect(fileRequests(http)).toEqual([]);
   });
 
   it('refuses an unsafe URL returned by the provider before downloading from it', async () => {
@@ -165,7 +167,7 @@ describe('GET /api/cloud/download: filename validation and URL refusal', () => {
 });
 
 describe('GET /api/cloud/download: safe failures distinct from a missing file', () => {
-  it.each(['CLOUD_STORAGE_PROVIDER', 'YANDEX_DISK_TOKEN', 'YANDEX_DISK_BASE_PATH'])
+  it.each(['CLOUD_STORAGES', 'CLOUD_STORAGE_ACTIVE'])
     ('requires private %s instead of falling back to the public token', async key => {
       privateEnvironment.values = { ...settings, [key]: undefined };
       vi.stubEnv('VITE_YANDEX_DISK_TOKEN', 'legacy-public-test-token');

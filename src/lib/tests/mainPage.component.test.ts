@@ -5,6 +5,7 @@ import { cloudFiles, syncFilesFromCloud, loadCardFromCloud } from '../stores/clo
 import { initDB, loadLocalCards } from '../stores/dbStore';
 import { makeCard, makeFile, NOW } from './helpers/fixtures';
 
+vi.mock('../services/storageSession',()=>({initializeStorageSession:async()=>({verified:true}),getStorageSession:()=>null}));
 vi.mock('../stores/cloudStore', async () => {
   const { writable } = await import('svelte/store');
   return {

@@ -1,6 +1,7 @@
 export interface CloudFile {
   path: string;
   name: string;
+  revision?: string;
   modified?: string; // ISO date string; omitted means unknown, never epoch/now.
 }
 
