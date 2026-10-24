@@ -2,7 +2,7 @@ import StorageSyncHarness from './helpers/StorageSyncHarness.svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import StorageSyncPanel from '../components/StorageSyncPanel.svelte';
-import { buildNoteInventory, planNoteSync } from '../domain/storageSync';
+import { buildNoteInventory, noteStorageTargetKey, planNoteSync } from '../domain/storageSync';
 import { available, note, OLD_SOURCE, NEW_SOURCE } from './helpers/storageSyncFixtures';
 import type { StorageComparison } from '../services/storageManagement';
 
@@ -49,9 +49,15 @@ const model: StorageComparison = {
   storages
 };
 beforeEach(() => {
-  actions.prepareStorageSync.mockImplementation((model, selection) =>
-    planNoteSync(model.snapshots, selection)
-  );
+  actions.prepareStorageSync.mockImplementation((model, selection) => ({
+    ...planNoteSync(model.snapshots, selection),
+    storageContexts: Object.fromEntries(
+      [selection.sourceStorageId, ...selection.targetStorageIds].map(id => [
+        id,
+        noteStorageTargetKey(model.storages.get(id))
+      ])
+    )
+  }));
   actions.runStorageSync.mockResolvedValue([
     {
       path: 'note.md',
@@ -101,6 +107,23 @@ function select(label: string, value: string) {
   input!.dispatchEvent(new Event('change', { bubbles: true }));
   flushSync();
 }
+
+function prepareNote(path: string, source: string, destinations: string[]) {
+  select('Заметки', path);
+  select('Эталон', source);
+  button('Сбросить все').click();
+  flushSync();
+  for (const id of destinations) {
+    const input = target.querySelector<HTMLInputElement>(`input[value="${id}"]`)!;
+    input.checked = true;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  }
+  button('Подготовить').click();
+  flushSync();
+}
+
+const queuedRows = () => [...target.querySelectorAll('[data-sync-preview] li')];
 
 it('orders references and destinations by active cloud, current cache, historical caches and other cloud groups', async () => {
   const columns: StorageComparison['columns'] = [
@@ -181,7 +204,7 @@ it('previews all selected copies and missing-source skips before explicit execut
   expect(target.textContent).toContain('Записано');
 });
 
-it('supports one note and invalidates the preview when selection changes', async () => {
+it('keeps prepared operations when the selected note, reference or destinations change', async () => {
   await render();
   select('Эталон', 'local:fixture');
   select('Заметки', 'note.md');
@@ -191,9 +214,149 @@ it('supports one note and invalidates the preview when selection changes', async
   expect(preview).toHaveLength(1);
   expect(preview[0].textContent).toContain('note.md');
   select('Заметки', 'only-cloud.md');
-  expect(
-    [...target.querySelectorAll('button')].some(button => button.textContent?.includes('Выполнить'))
-  ).toBe(false);
+  select('Эталон', 'cloud');
+  button('Сбросить все').click();
+  flushSync();
+  expect(queuedRows()).toHaveLength(1);
+  expect(queuedRows()[0].textContent).toMatch(/note\.md: Локальная копия.*→.*Облако/s);
+  expect(button('Выполнить').disabled).toBe(false);
+  expect(actions.runStorageSync).not.toHaveBeenCalled();
+});
+
+it('accumulates different references and destinations and submits their captured versions together once', async () => {
+  await render();
+  prepareNote('note.md', 'local:fixture', ['cloud']);
+  prepareNote('only-cloud.md', 'cloud', ['local:fixture']);
+  expect(queuedRows()).toHaveLength(2);
+  expect(queuedRows()[0].textContent).toMatch(/note\.md: Локальная копия.*→.*Облако/s);
+  expect(queuedRows()[1].textContent).toMatch(/only-cloud\.md: Облако.*→.*Локальная копия/s);
+  expect(actions.runStorageSync).not.toHaveBeenCalled();
+  const execute = button('Выполнить');
+  execute.click();
+  execute.click();
+  flushSync();
+  expect(target.querySelector('[data-sync-preview]')).toBeNull();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  expect(actions.runStorageSync).toHaveBeenCalledExactlyOnceWith(model, {
+    actions: [
+      {
+        path: 'note.md',
+        sourceStorageId: 'local:fixture',
+        targetStorageId: 'cloud',
+        status: 'copy',
+        source: OLD_SOURCE,
+        sourceRevision: null,
+        expectedTarget: { status: 'present', source: NEW_SOURCE, revision: null }
+      },
+      {
+        path: 'only-cloud.md',
+        sourceStorageId: 'cloud',
+        targetStorageId: 'local:fixture',
+        status: 'copy',
+        source: NEW_SOURCE,
+        sourceRevision: null,
+        expectedTarget: { status: 'missing' }
+      }
+    ],
+    storageContexts: { cloud: 'cloud:cloud', 'local:fixture': 'local:local:fixture' }
+  });
+  expect(complete).toHaveBeenCalledTimes(1);
+});
+
+it('deduplicates repeated and overlapping selections including missing-source skips', async () => {
+  await render();
+  prepareNote('', 'local:fixture', ['cloud']);
+  prepareNote('note.md', 'local:fixture', ['cloud']);
+  prepareNote('', 'local:fixture', ['cloud']);
+  expect(queuedRows()).toHaveLength(2);
+  expect(target.textContent).toContain('Эти операции уже есть в очереди');
+  expect(queuedRows()[1].textContent).toContain('Нет в эталоне');
+  button('Выполнить').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  expect(actions.runStorageSync.mock.calls[0][1].actions).toHaveLength(2);
+});
+
+it('adds another destination for an already queued note without duplicating its first destination', async () => {
+  const reserve = port('reserve', 'Резерв', 'cloud');
+  const extendedSnapshots = [...snapshots, available('reserve')];
+  await render({
+    ...model,
+    columns: [...model.columns, { id: 'reserve', label: 'Резерв', kind: 'cloud', contextId: null, active: false }],
+    storages: new Map([...storages, ['reserve', reserve]]),
+    snapshots: extendedSnapshots,
+    rows: buildNoteInventory(extendedSnapshots)
+  });
+  prepareNote('note.md', 'local:fixture', ['cloud']);
+  prepareNote('note.md', 'local:fixture', ['cloud', 'reserve']);
+  expect(queuedRows()).toHaveLength(2);
+  expect(queuedRows()[1].textContent).toMatch(/Локальная копия.*→.*Резерв/s);
+  button('Выполнить').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  expect(actions.runStorageSync.mock.calls[0][1].storageContexts).toEqual({
+    cloud: 'cloud:cloud',
+    'local:fixture': 'local:local:fixture',
+    reserve: 'cloud:reserve'
+  });
+});
+
+it('rejects a conflicting selection until the previous operation is explicitly removed', async () => {
+  const reserve = port('reserve', 'Резерв', 'cloud');
+  const extendedSnapshots = [
+    ...snapshots,
+    available('reserve', [note('note.md', 'reserve version'), note('only-cloud.md', 'reserve only')])
+  ];
+  await render({
+    ...model,
+    columns: [...model.columns, { id: 'reserve', label: 'Резерв', kind: 'cloud', contextId: null, active: false }],
+    storages: new Map([...storages, ['reserve', reserve]]),
+    snapshots: extendedSnapshots,
+    rows: buildNoteInventory(extendedSnapshots)
+  });
+  prepareNote('note.md', 'local:fixture', ['cloud']);
+  // Even a batch containing new paths must not silently replace a conflicting reference.
+  prepareNote('', 'reserve', ['cloud']);
+  expect(queuedRows()).toHaveLength(1);
+  expect(queuedRows()[0].textContent).toMatch(/Локальная копия.*→.*Облако/s);
+  expect(target.querySelector('[role="alert"]')?.textContent).toContain('с другим эталоном');
+  button('Удалить').click();
+  flushSync();
+  expect(target.querySelector('[data-sync-preview]')).toBeNull();
+  button('Подготовить').click();
+  flushSync();
+  expect(queuedRows()).toHaveLength(2);
+  expect(queuedRows().every(row => /Резерв.*→.*Облако/s.test(row.textContent!))).toBe(true);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(actions.runStorageSync).not.toHaveBeenCalled();
+});
+
+it('removes individual operations and clears the queue without executing them', async () => {
+  await render();
+  prepareNote('note.md', 'local:fixture', ['cloud']);
+  prepareNote('only-cloud.md', 'cloud', ['local:fixture']);
+  queuedRows()[0].querySelector('button')!.click();
+  flushSync();
+  expect(queuedRows()).toHaveLength(1);
+  expect(queuedRows()[0].textContent).toContain('only-cloud.md');
+  button('Очистить очередь').click();
+  flushSync();
+  expect(target.querySelector('[data-sync-preview]')).toBeNull();
+  expect(actions.runStorageSync).not.toHaveBeenCalled();
+  prepareNote('note.md', 'cloud', ['local:fixture']);
+  expect(queuedRows()).toHaveLength(1);
+  expect(queuedRows()[0].textContent).toMatch(/note\.md: Облако.*→.*Локальная копия/s);
+});
+
+it('cannot execute a queue containing only skipped operations', async () => {
+  await render();
+  prepareNote('', 'local:fixture', ['cloud']);
+  queuedRows()[0].querySelector('button')!.click();
+  flushSync();
+  expect(queuedRows()).toHaveLength(1);
+  expect(button('Выполнить').disabled).toBe(true);
+  button('Выполнить').click();
   expect(actions.runStorageSync).not.toHaveBeenCalled();
 });
 
@@ -287,7 +450,7 @@ it('dismisses only after an explicit click and renders escaped archive/history s
   expect(actions.runStorageSync).not.toHaveBeenCalled();
 });
 
-it('invalidates a prepared preview when a refreshed comparison replaces the model', async () => {
+it('clears every queued selection when a refreshed comparison replaces the model', async () => {
   component = mount(StorageSyncHarness, {
     target,
     props: {
@@ -300,9 +463,9 @@ it('invalidates a prepared preview when a refreshed comparison replaces the mode
     }
   });
   flushSync();
-  select('Эталон', 'local:fixture');
-  button('Подготовить').click();
-  flushSync();
+  prepareNote('note.md', 'local:fixture', ['cloud']);
+  prepareNote('only-cloud.md', 'cloud', ['local:fixture']);
+  expect(queuedRows()).toHaveLength(2);
   expect(
     [...target.querySelectorAll('button')].some(button => button.textContent?.includes('Выполнить'))
   ).toBe(true);
@@ -311,6 +474,9 @@ it('invalidates a prepared preview when a refreshed comparison replaces the mode
   expect(
     [...target.querySelectorAll('button')].some(button => button.textContent?.includes('Выполнить'))
   ).toBe(false);
+  expect(target.textContent).toContain('Очередь очищена');
+  prepareNote('note.md', 'cloud', ['local:fixture']);
+  expect(queuedRows()).toHaveLength(1);
   expect(actions.runStorageSync).not.toHaveBeenCalled();
 });
 

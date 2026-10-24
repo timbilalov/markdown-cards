@@ -202,6 +202,59 @@ test('batch copies exact unsupported text to several destinations and skips file
   expect(result.remote['Archive/reserve-only.md']).toBe('archive only');
 });
 
+test('queues several notes with different references and destinations before a single execution', async ({
+  page
+}, info) => {
+  await login(page);
+  await management(page);
+  await select(page, 'dropbox', ['disk', 'archive'], 'note.md');
+  await select(page, 'disk', ['dropbox'], 'disk-only.md');
+  await select(page, 'archive', ['disk'], 'reserve-only.md');
+  const queue = page.locator('[data-sync-preview]');
+  await expect(queue.locator('li')).toHaveCount(4);
+  await expect(queue).toContainText('К копированию: 4');
+  expect((await effects()).writes).toEqual([]);
+  await queue.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('sync-queue.png'), fullPage: true });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await queue.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('sync-queue-mobile.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Выполнить синхронизацию', exact: true }).click();
+  await expect(page.getByText('Записано', { exact: true })).toHaveCount(4);
+  await expect(queue).toHaveCount(0);
+  const result = await effects();
+  expect(result.writes).toHaveLength(4);
+  expect(result.remote['md-cards/note.md']).toBe(newer);
+  expect(result.remote['Archive/note.md']).toBe(newer);
+  expect(result.remote['dropbox:/disk-only.md']).toBe('disk only');
+  expect(result.remote['md-cards/reserve-only.md']).toBe('archive only');
+});
+
+test('rechecks queued versions and completes independent operations after another destination changes', async ({
+  page
+}) => {
+  await login(page);
+  await management(page);
+  await select(page, 'dropbox', ['disk'], 'note.md');
+  await select(page, 'archive', ['dropbox'], 'reserve-only.md');
+  await server.reset({
+    'md-cards/note.md': 'changed after preparation',
+    'md-cards/disk-only.md': 'disk only',
+    'dropbox:/note.md': newer,
+    'dropbox:/raw.md': raw,
+    'Archive/reserve-only.md': 'archive only'
+  });
+  await page.getByRole('button', { name: 'Выполнить синхронизацию', exact: true }).click();
+  await expect(page.getByText('Назначение изменилось — обновите версии', { exact: true })).toBeVisible();
+  await expect(page.getByText('Записано', { exact: true })).toBeVisible();
+  const result = await effects();
+  expect(result.writes).toHaveLength(1);
+  expect(result.remote['md-cards/note.md']).toBe('changed after preparation');
+  expect(result.remote['dropbox:/reserve-only.md']).toBe('archive only');
+});
+
 test('groups a historical Dropbox cache with its active connection in the table and both selectors', async ({
   page
 }) => {

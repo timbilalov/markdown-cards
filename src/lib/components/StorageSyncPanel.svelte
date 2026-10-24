@@ -15,8 +15,9 @@
   let source = $state('');
   let path = $state('');
   let targets = $state<string[]>([]);
-  let plan = $state<PreparedStorageSync | null>(null);
-  let planModel = $state.raw<StorageComparison | null>(null);
+  let queue = $state<PreparedStorageSync | null>(null);
+  let queueModel = $state.raw<StorageComparison | null>(null);
+  let queueMessage = $state<string | null>(null);
   let results = $state<NoteSyncResult[]>([]);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -40,7 +41,13 @@
   $effect(() => {
     if (source && !referenceChoices.some(column => column.id === source)) {
       source = '';
-      plan = null;
+    }
+  });
+  $effect(() => {
+    if (queueModel && queueModel !== model) {
+      queue = null;
+      queueModel = null;
+      queueMessage = 'Версии обновлены. Очередь очищена; подготовьте синхронизацию заново.';
     }
   });
 
@@ -82,26 +89,64 @@
         : 'Хранилище недоступно, запись не выполнена';
   }
 
-  function invalidate() {
-    plan = null;
+  function selectionChanged() {
+    error = null;
+    queueMessage = null;
   }
 
   function selectTargets(all: boolean) {
     targets = all ? targetChoices.map(column => column.id) : [];
-    invalidate();
+    selectionChanged();
   }
 
   function prepare() {
+    if (busy) return;
     error = null;
-    results = [];
-    planModel = model;
-    plan = app.prepareStorageSync(model, {
+    queueMessage = null;
+    const prepared = app.prepareStorageSync(model, {
       paths: path ? [path] : model.rows.map(row => row.path),
       sourceStorageId: source,
       targetStorageIds: targetChoices
         .filter(column => targets.includes(column.id))
         .map(column => column.id)
     });
+    const current = queueModel === model ? queue : null;
+    const key = (action: PreparedStorageSync['actions'][number]) =>
+      JSON.stringify([action.path, action.targetStorageId]);
+    const existing = new Map(current?.actions.map(action => [key(action), action]));
+    const conflict = prepared.actions.find(action => {
+      const queued = existing.get(key(action));
+      return queued && queued.sourceStorageId !== action.sourceStorageId;
+    });
+    if (conflict) {
+      error = `В очереди уже есть ${conflict.path} → ${label(conflict.targetStorageId)} с другим эталоном. Удалите прежнюю операцию перед добавлением.`;
+      return;
+    }
+    const added = prepared.actions.filter(action => !existing.has(key(action)));
+    queue = {
+      actions: [...(current?.actions ?? []), ...added],
+      storageContexts: { ...current?.storageContexts, ...prepared.storageContexts }
+    };
+    queueModel = model;
+    queueMessage = added.length
+      ? `Добавлено операций: ${added.length}.`
+      : 'Эти операции уже есть в очереди.';
+    results = [];
+  }
+
+  function removeQueued(index: number) {
+    if (busy || !queue || queueModel !== model) return;
+    const actions = queue.actions.filter((_, position) => position !== index);
+    queue = actions.length ? { ...queue, actions } : null;
+    if (!queue) queueModel = null;
+    selectionChanged();
+  }
+
+  function clearQueue() {
+    if (busy) return;
+    queue = null;
+    queueModel = null;
+    selectionChanged();
   }
 
   async function refreshRecovery() {
@@ -115,11 +160,13 @@
   }
 
   async function execute() {
-    if (!plan || planModel !== model || busy) return;
-    const submitted = $state.snapshot(plan);
-    plan = null;
+    if (!queue || queueModel !== model || busy || !queue.actions.some(action => action.status === 'copy'))
+      return;
+    const submitted = $state.snapshot(queue);
+    clearQueue();
     busy = true;
     error = null;
+    results = [];
     try {
       results = await app.runStorageSync(model, submitted);
       if (alive) {
@@ -198,14 +245,15 @@
 <section class="box" aria-label="Ручная синхронизация">
   <h2 class="title is-4">Ручная синхронизация</h2>
   <p class="mb-3">
-    Выберите точный эталон и назначения. Можно выбрать более старую версию. Исходный текст и
-    Modified сохранятся; удалений нет.
+    Выберите заметку, точный эталон и назначения, затем подготовьте синхронизацию. Повторите
+    для других заметок и выполните всю очередь. Можно выбрать более старую версию. Исходный
+    текст и Modified сохранятся; удалений нет.
   </p>
   <fieldset disabled={busy}>
     <div class="field">
       <label for="sync-notes">Заметки</label>
       <div class="select">
-        <select id="sync-notes" aria-label="Заметки" bind:value={path} onchange={invalidate}>
+        <select id="sync-notes" aria-label="Заметки" bind:value={path} onchange={selectionChanged}>
           <option value="">Все заметки</option>
           {#each model.rows as row (row.path)}
             <option value={row.path}>{storageNoteLabel(row)}</option>
@@ -216,7 +264,7 @@
     <div class="field">
       <label for="sync-reference">Эталон</label>
       <div class="select">
-        <select id="sync-reference" aria-label="Эталон" bind:value={source} onchange={invalidate}>
+        <select id="sync-reference" aria-label="Эталон" bind:value={source} onchange={selectionChanged}>
           <option value="">Выберите источник</option>
           {#each referenceChoices as column (column.id)}
             <option value={column.id}>{storageLocationLabel(column)}</option>
@@ -236,7 +284,7 @@
       </div>
       {#each targetChoices as column (column.id)}
         <label class="checkbox mr-4">
-          <input type="checkbox" value={column.id} bind:group={targets} onchange={invalidate} />
+          <input type="checkbox" value={column.id} bind:group={targets} onchange={selectionChanged} />
           {storageLocationLabel(column)}
         </label>
       {/each}
@@ -251,29 +299,45 @@
       Подготовить синхронизацию
     </button>
   </fieldset>
-  {#if plan && planModel === model}
+  {#if queueMessage}
+    <p class="mt-3" role="status">{queueMessage}</p>
+  {/if}
+  {#if queue?.actions.length && queueModel === model}
     <div class="notification mt-4" data-sync-preview>
-      <h3 class="title is-5">План синхронизации</h3>
+      <h3 class="title is-5">Очередь синхронизации ({queue.actions.length})</h3>
       <p>
-        Существующие версии в назначениях будут заменены выбранным эталоном. Проверьте направление
-        копирования.
+        Существующие версии в назначениях будут заменены выбранными эталонами. Проверьте
+        направления копирования. К копированию: {queue.actions.filter(action => action.status === 'copy').length}.
       </p>
+      <p>Очередь очищается при обновлении версий или перезагрузке страницы.</p>
       <ul>
-        {#each plan.actions as action (`${action.path}:${action.targetStorageId}`)}<li>
-            {action.path}: {label(action.sourceStorageId)} → {label(action.targetStorageId)} — {action.status ===
-            'copy'
-              ? 'Копировать'
-              : (reasons[action.reason] ?? 'Заблокировано')}
+        {#each queue.actions as action, index (JSON.stringify([action.path, action.targetStorageId]))}
+          <li class="sync-queue-row">
+            <span>
+              {action.path}: {label(action.sourceStorageId)} → {label(action.targetStorageId)} — {action.status ===
+              'copy'
+                ? 'Копировать'
+                : (reasons[action.reason] ?? 'Заблокировано')}
+            </span>
+            <button
+              class="button is-small"
+              disabled={busy}
+              aria-label={`Удалить из очереди: ${action.path}, ${label(action.sourceStorageId)} → ${label(action.targetStorageId)}`}
+              onclick={() => removeQueued(index)}
+            >Удалить</button>
           </li>
         {/each}
       </ul>
-      <button
-        class="button is-warning mt-3"
-        disabled={busy || !plan.actions.some(action => action.status === 'copy')}
-        onclick={execute}
-      >
-        Выполнить синхронизацию
-      </button>
+      <div class="buttons mt-3">
+        <button
+          class="button is-warning"
+          disabled={busy || !queue.actions.some(action => action.status === 'copy')}
+          onclick={execute}
+        >
+          Выполнить синхронизацию
+        </button>
+        <button class="button" disabled={busy} onclick={clearQueue}>Очистить очередь</button>
+      </div>
     </div>
   {/if}
   {#if busy}
@@ -367,6 +431,17 @@
   }
   li {
     margin-top: 0.4rem;
+  }
+  .sync-queue-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .sync-queue-row span {
+    flex: 1 1 20rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   details {
     margin: 0.5rem 0;
