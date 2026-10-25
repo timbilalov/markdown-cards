@@ -60,12 +60,25 @@ function downloads() {
 }
 
 describe('board: listed files with an unknown remote modification time', () => {
-  it('shows an explicit unknown date on a cold load without guessing a date or downloading each note', async () => {
+  it('loads a cold cloud-only note with its full metadata even without a provider date', async () => {
+    http.on('GET', '/api/cloud/download?path=test-card.md', () => new Response(v1));
+    await renderPage();
+    expect(tile().querySelector('h3')?.textContent).toBe(v1Card.title);
+    expect(tile().closest('.kanban-column')?.querySelector('h2')?.textContent).toContain(v1Card.status);
+    expect(tile().querySelector('img')?.getAttribute('src')).toBe(v1Card.image);
+    expect(tile().querySelector('.modified-date')?.textContent).toContain(new Date(v1Card.meta.modified).toLocaleDateString());
+    expect(downloads()).toHaveLength(1);
+    expect(await db.getCard('test-card')).toEqual(storedCard(v1Card));
+    expect(await db.getMarkdownDocument('test-card')).toMatchObject({ result: { status: 'success', document: { source: v1 } } });
+  });
+
+  it('retains the filename and an explicit unknown date when a cold download fails', async () => {
+    http.on('GET', '/api/cloud/download?path=test-card.md', () => new Response(null, { status: 401 }));
     await renderPage();
     expect(tile().querySelector('.modified-date')?.textContent).toContain('Дата изменения неизвестна');
     expect(tile().querySelector('h3')?.textContent).toBe('test-card');
     expect(target.textContent).not.toContain('Invalid Date');
-    expect(downloads()).toEqual([]);
+    expect(downloads()).toHaveLength(1);
     expect(await db.getAllCards()).toEqual([]);
   });
 

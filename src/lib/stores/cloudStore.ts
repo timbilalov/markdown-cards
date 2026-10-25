@@ -6,7 +6,7 @@ import { performanceMonitor } from '../services/performanceMonitor';
 import { getCardSync } from '../services/cardSyncRuntime';
 import { parseMarkdownDocument } from '../domain/markdown';
 import { parseCloudModifiedTime } from '../utils/cloudMetadata';
-import type { Card } from '../domain/types';
+import type { BoardCardLoadResult } from '../application/loadBoard';
 import { isAuthenticated, sessionGeneration, setAuthenticationStatus, confirmAuthenticationStatus } from './sessionState';
 export { isAuthenticated, setAuthenticationStatus } from './sessionState';
 
@@ -59,27 +59,29 @@ export async function syncFilesFromCloud(signal?: AbortSignal): Promise<void> {
 }
 
 // Read a display Card from either a protected local version or the provider.
-export async function loadCardFromCloud(file: CloudFile, signal?: AbortSignal): Promise<Card | null> {
+export async function loadCardFromCloud(file: CloudFile, signal?: AbortSignal, forceRefresh = false): Promise<BoardCardLoadResult> {
   const startTime = performanceMonitor.start('cloud');
   let success = false;
   let cacheHit = false;
 
   try {
     const loaded = await (await getCardSync()).load(file.name, {
-      projectCard: true, listed: true, modifiedAt: parseCloudModifiedTime(file.modified), signal
+      projectCard: true, listed: true, modifiedAt: forceRefresh ? undefined : parseCloudModifiedTime(file.modified), signal
     });
-    if ('projection' in loaded && loaded.projection) { success = true; cacheHit = true; return loaded.projection; }
-    if (!('source' in loaded)) return null;
+    // A readable local fallback does not confirm a successful cloud refresh.
+    // Protected drafts may intentionally be returned without a provider read.
+    if (loaded.loadFailure || (!('saveId' in loaded && loaded.saveId)
+      && ['not-found', 'unauthorized', 'remote-unavailable', 'offline'].includes(loaded.status))) return { status: 'unavailable' };
+    if ('projection' in loaded && loaded.projection) { success = true; cacheHit = true; return { status: 'loaded', card: loaded.projection }; }
+    if (!('source' in loaded)) return { status: 'unprojected' };
     cacheHit = loaded.origin === 'local';
-    const parsed = parseMarkdownDocument(loaded.source);
-    if (parsed.status !== 'success') return null;
-    const card = parsed.document.card;
-
+    // Having the source is a successful read even if its format cannot produce a Card.
     success = true;
-    return card;
+    const parsed = parseMarkdownDocument(loaded.source);
+    return parsed.status === 'success' ? { status: 'loaded', card: parsed.document.card } : { status: 'unprojected' };
   } catch (error) {
     console.error('Error loading card from cloud:', error);
-    return null;
+    return { status: 'unprojected' };
   } finally {
     // Voluntary cancellation is excluded from completed-read statistics.
     if (!signal?.aborted) {

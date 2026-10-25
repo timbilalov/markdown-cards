@@ -230,8 +230,8 @@ test('mobile multi-column board and editor expose named keyboard controls withou
     `md-cards/note-${i}.md`, source.replace('Карточка 🗂', `${status} note`).replace('В процессе', ['Предстоящие', 'В процессе', 'Done'][i]).replace('test-card', `note-${i}`)
   ])));
   await login(page);
-  // A fresh profile first lists filenames; Save adds a local Card projection.
-  const first = page.getByRole('link', { name: /^note-0 / });
+  // A fresh profile loads the title and status directly from cloud Markdown.
+  const first = page.getByRole('link', { name: /Todo note/ });
   await first.focus(); await page.keyboard.press('Enter');
   await expect(page.getByLabel('Название заметки')).toHaveValue('Todo note');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -257,7 +257,7 @@ test('mobile multi-column board and editor expose named keyboard controls withou
   await page.screenshot({ path: testInfo.outputPath('mobile-editor.png'), fullPage: true });
 });
 
-test('guest startup and logout do not request cloud files; login resumes loading without reload', async ({ page }) => {
+test('guest startup and logout do not request cloud files; a later login reuses the cache until manual refresh', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', request => {
     const path = new URL(request.url()).pathname;
@@ -291,7 +291,10 @@ test('guest startup and logout do not request cloud files; login resumes loading
   await page.waitForTimeout(5500);
   expect(requests).toEqual([]);
   await submitLogin();
-  expect(requests).toContain('/api/cloud/files');
+  await expect(page.locator('.board-progress')).toHaveCount(0);
+  expect(requests).toEqual([]);
+  await page.getByRole('button', { name: 'Обновить все заметки из облака' }).click();
+  await expect.poll(() => requests.includes('/api/cloud/files')).toBe(true);
 });
 
 test('Home after logout redirects to login without exposing or deleting cached cards', async ({ page }) => {

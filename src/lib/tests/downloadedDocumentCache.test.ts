@@ -92,10 +92,10 @@ describe.each(paths)('%s: downloaded source reaches durable document storage', p
       expect(await db.getAllCards()).toEqual(before);
     } else if (result.status === 'success') {
       expect(await db.getCard(filename)).toEqual(storedCard(v1Card));
-      if (path === 'board') expect(loaded).toEqual(v1Card);
+      if (path === 'board') expect(loaded).toEqual({ status: 'loaded', card: v1Card });
     } else {
       expect(await db.getAllCards()).toEqual(before);
-      if (path === 'board') expect(loaded).toBeNull();
+      if (path === 'board') expect(loaded).toEqual({ status: 'unprojected' });
     }
     expect(remote.downloads).toEqual([{ filename: `${filename}.md`, source }]);
     expect(queue).not.toHaveBeenCalled();
@@ -168,7 +168,7 @@ describe.each(paths)('%s: downloaded source reaches durable document storage', p
       expect(get(cards.cardSaveMessage)).toBeNull();
     } else {
       expect(await db.getAllCards()).toEqual(before);
-      if (path === 'board') expect(loaded).toBeNull();
+      if (path === 'board') expect(loaded).toEqual({ status: 'unprojected' });
     }
     {
       const sourceWrites = persist.mock.calls.filter((_, i) =>

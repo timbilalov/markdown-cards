@@ -1,5 +1,10 @@
 import type { Card } from '../../domain/types';
 import type { CloudFile, CloudFileListResponse } from '../../types/cloud';
+import type { BoardCardLoadResult } from '../../application/loadBoard';
+
+export function boardReadResult(card: Card | null): BoardCardLoadResult {
+  return card ? { status: 'loaded', card } : { status: 'unavailable' };
+}
 
 export const NOW = Date.parse('2026-09-25T12:34:56.789Z');
 export const DAY = 24 * 60 * 60 * 1000;

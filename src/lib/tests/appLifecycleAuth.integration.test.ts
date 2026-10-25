@@ -1,4 +1,4 @@
-import { initializeTestStorage, browserStorageDescriptor } from './helpers/browserStorageContext';
+import { initializeTestStorage } from './helpers/browserStorageContext';
 import { historicalStorage } from './helpers/historicalStorage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
@@ -128,7 +128,7 @@ describe('background cloud work follows the authenticated session', () => {
     expect(await saves.readCurrent(path)).toEqual(before);
   });
 
-  it('stops scheduled cloud work on logout and resumes cache refresh after a later login without remount', async () => {
+  it('does not start an independent cache refresh after a later login without remount', async () => {
     authenticated = true;
     await start();
     expect(get(cloud.isAuthenticated)).toBe(true);
@@ -143,7 +143,7 @@ describe('background cloud work follows the authenticated session', () => {
     expect(await cloud.checkIsSessionAuthenticated()).toBe(true);
     await drainIndexedDb(); // Login verifies/binds the destination before timers start.
     await advance(5100);
-    expect(cloudRequests()).toEqual([['/api/cloud/files', { method: 'GET', signal: expect.any(AbortSignal), headers: {'X-Storage-Context':browserStorageDescriptor.contextId} }]]);
+    expect(cloudRequests()).toEqual([]);
     stop?.(); stop = undefined;
     http.fetch.mockClear();
     await cloud.logout();
@@ -153,28 +153,18 @@ describe('background cloud work follows the authenticated session', () => {
     expect(cloudRequests()).toEqual([]);
   });
 
-  it('does not start a download when an already running cache refresh receives its file list after logout', async () => {
-    const listed = Promise.withResolvers<Response>();
-    let listingStarted = false;
-    http.on('GET', '/api/cloud/files', () => {
-      listingStarted = true;
-      return listed.promise;
-    });
-    // A real 401 lets the test observe the request even when the cache manager
-    // catches the refusal. A missing mock must not be the reason for RED.
-    http.on('GET', '/api/cloud/download?path=test-card.md', () =>
-      Response.json({ error: 'Not authenticated' }, { status: 401 }));
+  it('does not duplicate a board refresh at startup or on another visit within ten minutes', async () => {
     authenticated = true;
     await start();
+    const { app } = await import('../stores/appFacade');
+    await app.loadBoard(() => {}, new AbortController().signal);
+    expect(cloudRequests()).toHaveLength(1);
     await advance(5100);
-    expect(listingStarted).toBe(true);
-
+    await app.loadBoard(() => {}, new AbortController().signal);
+    expect(cloudRequests()).toHaveLength(1);
     await cloud.logout();
-    expect(get(cloud.isAuthenticated)).toBe(false);
     http.fetch.mockClear();
-    listed.resolve(Response.json(fileList([makeFile()])));
-    await drainIndexedDb();
-
+    await advance(5100);
     expect(cloudRequests()).toEqual([]);
   });
 });

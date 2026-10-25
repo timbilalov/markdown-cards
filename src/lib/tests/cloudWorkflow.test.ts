@@ -39,7 +39,7 @@ describe('Load workflow with real cache and HTTP boundary', () => {
     expect(monitor.getSummary('cloud')).toMatchObject({ operations: 1, errorRate: 0, hitRate: undefined });
     expect(monitor.getCacheHitRate('card')).toBe(100);
     http.on('GET', '/api/cloud/download?path=missing.md', () => new Response(null, { status: 503 }));
-    expect(await cloud.loadCardFromCloud(makeFile({ name: 'missing.md' }))).toBeNull();
+    expect(await cloud.loadCardFromCloud(makeFile({ name: 'missing.md' }))).toEqual({ status: 'unavailable' });
     expect(monitor.getSummary('cloud')).toMatchObject({ operations: 2, errorRate: 0.5 });
     expect(monitor.getCacheHitRate('card')).toBe(50);
     expect(monitor.getSummary('cache_card')).toMatchObject({ hitRate: 50 });
@@ -48,7 +48,7 @@ describe('Load workflow with real cache and HTTP boundary', () => {
   it.each([0, 1])('returns the cache without download when local is equal or %i ms newer', async (delta) => {
     const card = makeCard({ meta: { id: 'test-card', created: NOW, modified: NOW + delta } });
     await db.saveCard(card);
-    expect(await cloud.loadCardFromCloud(makeFile())).toEqual(storedCard(card));
+    expect(await cloud.loadCardFromCloud(makeFile())).toEqual({ status: 'loaded', card: storedCard(card) });
     expect(http.fetch.mock.calls.some(([url]) => String(url).startsWith('/api/cloud/download'))).toBe(false);
   });
 
@@ -57,7 +57,7 @@ describe('Load workflow with real cache and HTTP boundary', () => {
     await db.saveCard(card);
     const file = makeFile();
     onDocumentDownload(http, file, () => new Response(null, { status: 401 }));
-    expect(await cloud.loadCardFromCloud(file)).toBeNull();
+    expect(await cloud.loadCardFromCloud(file)).toEqual({ status: 'unavailable' });
     expect(await db.getCard('test-card')).toEqual(storedCard(card));
   });
 

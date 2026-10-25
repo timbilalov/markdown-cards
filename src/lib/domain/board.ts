@@ -16,7 +16,7 @@ function localDisplay(card: BoardLocalEntry): BoardCard {
   };
 }
 
-// Preserve the board's legacy timestamp policy for display/refresh only.
+// Provider timestamps request refreshes; display dates belong to documents.
 // Pending writes and revision conflicts require the separate sync policy.
 export function reconcileBoardCards(
   localCards: readonly BoardLocalEntry[],
@@ -31,8 +31,8 @@ export function reconcileBoardCards(
     if (local) {
       const display = localDisplay(local);
       if ('sourceOnly' in local || remote.modified === undefined || remote.modified > local.meta.modified) {
-        // Unknown remote time requires a read; retain the local date meanwhile.
-        if (remote.modified !== undefined) display.modified = remote.modified;
+        // Retain the document date while reading, even if the provider's mtime
+        // differs. Otherwise listing alone would reorder the cached board.
         display.source = 'mixed';
         result.refreshFilenames.push(remote.filename);
       }
@@ -41,7 +41,6 @@ export function reconcileBoardCards(
       result.cards.push({
         filename: remote.filename,
         title: remote.filename,
-        modified: remote.modified,
         source: 'cloud'
       });
       result.refreshFilenames.push(remote.filename);
@@ -60,7 +59,15 @@ export function deriveBoardColumns(cards: readonly BoardCard[]): BoardColumn[] {
     ['Предстоящие', 'В процессе', 'Done'].map(status => [status, { status, cards: [] }])
   );
 
-  for (const card of cards) {
+  // Both cached and downloaded cards use the document's Modified date. Unknown
+  // dates go last; filename resolves equal dates independently of source order.
+  for (const card of [...cards].sort((left, right) => {
+    if (left.modified === undefined) {
+      if (right.modified !== undefined) return 1;
+    } else if (right.modified === undefined) return -1;
+    else if (left.modified !== right.modified) return right.modified - left.modified;
+    return left.filename < right.filename ? -1 : left.filename > right.filename ? 1 : 0;
+  })) {
     const status = card.status || 'Без статуса';
     let column = columns.get(status);
     if (!column) {

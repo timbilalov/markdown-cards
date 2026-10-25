@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLegacyClientToken } from './helpers/legacyClientConfiguration';
 import { makeCard, NOW, storedCard } from './helpers/fixtures';
 import { makeReadFile, mockMarkdownReadHttp } from './helpers/markdownReadHttp';
-import { v1, futureV1Shape, unknownMetadata } from './helpers/markdownReadFixtures';
+import { v1, futureV1Shape, unknownMetadata, rejectedMarkdown } from './helpers/markdownReadFixtures';
 
 vi.mock('$app/environment', () => ({ browser: true }));
 
@@ -20,7 +20,7 @@ const local = makeCard({ title: 'Сохранённая карточка', statu
 
 beforeEach(async () => {
   vi.resetModules();
-  // Keep the page's five-second background validation and DB metrics interval
+  // Keep the board's refresh timer and DB metrics interval
   // controlled; fake-indexeddb still uses its real asynchronous callbacks.
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(NOW);
@@ -68,6 +68,55 @@ describe('board with real stores, download and IndexedDB', () => {
     await vi.waitFor(() => { runtime.flushSync(); expect(target.querySelector('[role="alert"]')).not.toBeNull(); });
     expect(target.textContent).not.toContain('Offline Mode');
     expect(target.querySelector('a[data-source] h3')?.textContent).toBe(local.title);
+  });
+
+  it('marks a failed cloud refresh even with a readable cached source and retries its download', async () => {
+    const { serializeMarkdownDocument } = await import('../domain/markdown');
+    const serialized = serializeMarkdownDocument(local);
+    if (serialized.status !== 'success') throw new Error('Invalid fixture');
+    await db.saveMarkdownDocument('test-card', serialized.markdown);
+    let requests = 0;
+    remote.http.on('GET', '/api/cloud/download?path=test-card.md', () => ++requests === 1
+      ? Response.json({ error: 'CLOUD_UNAVAILABLE' }, { status: 503 }) : new Response(v1));
+    component = runtime.mount(MainPage, { target }); runtime.flushSync();
+    await vi.waitFor(() => { runtime.flushSync(); expect(target.querySelector('.card-load-error')).not.toBeNull(); });
+    expect(target.querySelector('a[data-source] h3')?.textContent).toBe(local.title);
+    expect(await db.getMarkdownDocument('test-card')).toMatchObject({ result: { document: { source: serialized.markdown } } });
+    target.querySelector<HTMLButtonElement>('.card-load-error')!.click();
+    await vi.waitFor(() => { runtime.flushSync(); expect(target.querySelector('a[data-source] h3')?.textContent).toBe('Карточка 🗂'); });
+    expect(target.querySelector('.card-load-error')).toBeNull();
+    expect(requests).toBe(2);
+    expect(await db.getMarkdownDocument('test-card')).toMatchObject({ result: { document: { source: v1 } } });
+    expect(await historicalStorage.getPendingSyncOperations()).toEqual([]);
+  });
+
+  it.each([...rejectedMarkdown, ['empty content', ''] as const])('does not offer a cloud retry for successfully downloaded %s, with or without a cached Card', async (_, source) => {
+    remote = mockMarkdownReadHttp([
+      { file: makeReadFile(), source }, { file: makeReadFile({ name: 'cloud-only.md' }), source }
+    ]);
+    component = runtime.mount(MainPage, { target }); runtime.flushSync();
+    await vi.waitFor(() => { runtime.flushSync(); expect(target.querySelector('.board-progress')).toBeNull(); });
+    expect(remote.downloads).toHaveLength(2);
+    expect(target.querySelectorAll('a[data-source]')).toHaveLength(2);
+    expect(target.querySelector('.card-load-error')).toBeNull();
+    expect(target.querySelector('a[href="/card/test-card"] h3')?.textContent).toBe(local.title);
+    await runtime.unmount(component); component = undefined;
+    component = runtime.mount(MainPage, { target }); runtime.flushSync();
+    await vi.waitFor(() => { runtime.flushSync(); expect(target.querySelector('.board-progress')).toBeNull(); });
+    expect(remote.downloads).toHaveLength(2);
+    expect(target.querySelector('.card-load-error')).toBeNull();
+  });
+
+  it('removes the request error after a retry receives unparseable content', async () => {
+    let requests = 0;
+    remote.http.on('GET', '/api/cloud/download?path=test-card.md', () => ++requests === 1
+      ? Response.json({ error: 'CLOUD_UNAVAILABLE' }, { status: 503 }) : new Response(futureV1Shape));
+    component = runtime.mount(MainPage, { target }); runtime.flushSync();
+    await vi.waitFor(() => { runtime.flushSync(); expect(target.querySelector('.card-load-error')).not.toBeNull(); });
+    target.querySelector<HTMLButtonElement>('.card-load-error')!.click(); runtime.flushSync();
+    await vi.waitFor(() => { runtime.flushSync(); expect(requests).toBe(2); expect(target.querySelector('.card-loading')).toBeNull(); });
+    expect(target.querySelector('.card-load-error')).toBeNull();
+    expect(target.querySelector('a[href="/card/test-card"] h3')?.textContent).toBe(local.title);
   });
   it('keeps the filename address after caching a document with a different internal Card ID', async () => {
     const filename = 'Архив #1 ? заметка';

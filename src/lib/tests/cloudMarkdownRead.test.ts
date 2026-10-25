@@ -25,6 +25,11 @@ beforeEach(async () => {
 afterEach(() => remote.http.assertHandled());
 
 describe('board loader: strict downloaded Markdown', () => {
+  it('bypasses the timestamp shortcut for an explicit retry', async () => {
+    await db.saveCard(makeCard({ meta: { ...v1Card.meta, modified: Date.parse('2050-01-01') } }));
+    expect(await cloud.loadCardFromCloud(makeReadFile(), undefined, true)).toEqual({ status: 'loaded', card: v1Card });
+    expect(remote.downloads).toHaveLength(1);
+  });
   // Replaces the cloudWorkflow characterization that required remote mtime
   // to overwrite meta.modified. The document owns its semantic timestamps.
   it('refreshes an older cached card with complete v1 and keeps document timestamps instead of remote mtime', async () => {
@@ -33,7 +38,7 @@ describe('board loader: strict downloaded Markdown', () => {
 
     const result = await cloud.loadCardFromCloud(makeReadFile());
 
-    expect(result).toEqual(v1Card);
+    expect(result).toEqual({ status: 'loaded', card: v1Card });
     expect(await db.getCard(v1Card.meta.id)).toMatchObject(v1Card);
     expect(await db.getCard('test-card')).toEqual(storedCard(v1Card));
     expect(remote.downloads).toEqual([{ filename: 'test-card.md', source: v1 }]);
@@ -47,7 +52,7 @@ describe('board loader: strict downloaded Markdown', () => {
 
     const result = await cloud.loadCardFromCloud(file);
 
-    expect(result).toEqual(v1Card);
+    expect(result).toEqual({ status: 'loaded', card: v1Card });
     expect(await db.getCard('test-card')).toEqual(storedCard(v1Card, 'existing-note'));
     expect(await db.getCard('existing-note')).toBeNull();
     expect(remote.downloads).toEqual([{ filename: file.name, source }]);
@@ -64,7 +69,7 @@ describe('board loader: strict downloaded Markdown', () => {
 
     const result = await cloud.loadCardFromCloud(makeReadFile());
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'unprojected' });
     expect(write).not.toHaveBeenCalled();
     expect(queue).not.toHaveBeenCalled();
     expect(await db.getAllCards()).toEqual(before);
@@ -77,7 +82,7 @@ describe('board loader: strict downloaded Markdown', () => {
 
     const result = await cloud.loadCardFromCloud(makeReadFile());
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'unprojected' });
     expect(write).not.toHaveBeenCalled();
     expect(await db.getAllCards()).toEqual([]);
     expect(remote.downloads).toEqual([{ filename: 'test-card.md', source: unknownMetadata }]);

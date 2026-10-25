@@ -27,7 +27,7 @@ describe('reconcileBoardCards: pure board projection', () => {
     const remote = { filename: 'remote-only', modified: NOW };
     expect(reconcileBoardCards([], [remote])).toEqual({
       cards: [{
-        filename: 'remote-only', title: 'remote-only', modified: NOW,
+        filename: 'remote-only', title: 'remote-only', modified: undefined,
         source: 'cloud', status: undefined, image: undefined
       }],
       refreshFilenames: ['remote-only']
@@ -50,7 +50,7 @@ describe('reconcileBoardCards: pure board projection', () => {
     const local = makeCard({ meta: { id: 'test-card', created: NOW, modified: NOW } });
     expect(reconcileBoardCards([local], [{ filename: 'test-card', modified: NOW + 1 }])).toEqual({
       cards: [{
-        filename: 'test-card', title: local.title, modified: NOW + 1, source: 'mixed',
+        filename: 'test-card', title: local.title, modified: NOW, source: 'mixed',
         status: local.status, image: local.image
       }],
       refreshFilenames: ['test-card']
@@ -67,8 +67,8 @@ describe('reconcileBoardCards: pure board projection', () => {
       { filename: 'current', modified: NOW }
     ])).toEqual({
       cards: [
-        { filename: 'test-card', title: local.title, modified: NOW, source: 'mixed', status: local.status, image: local.image },
-        { filename: 'remote-only', title: 'remote-only', modified: NOW, source: 'cloud', status: undefined, image: undefined },
+        { filename: 'test-card', title: local.title, modified: local.meta.modified, source: 'mixed', status: local.status, image: local.image },
+        { filename: 'remote-only', title: 'remote-only', modified: undefined, source: 'cloud', status: undefined, image: undefined },
         { filename: 'current', title: current.title, modified: NOW, source: 'indexeddb', status: current.status, image: current.image },
         { filename: 'local-only', title: localOnly.title, modified: localOnly.meta.modified, source: 'indexeddb', status: localOnly.status, image: localOnly.image }
       ],
@@ -92,7 +92,7 @@ describe('reconcileBoardCards: pure board projection', () => {
   });
 });
 
-describe('deriveBoardColumns: pure grouping', () => {
+describe('deriveBoardColumns: grouping and ordering', () => {
   it('retains empty default columns in the current board order', () => {
     expect(deriveBoardColumns([])).toEqual([
       { status: 'Предстоящие', cards: [] },
@@ -101,7 +101,7 @@ describe('deriveBoardColumns: pure grouping', () => {
     ]);
   });
 
-  it('groups default, custom and absent statuses without changing card order', () => {
+  it('groups default, custom and absent statuses and resolves equal dates by filename', () => {
     const first = { filename: 'first', title: 'Первый', modified: NOW, source: 'indexeddb' as const, status: 'Done' };
     const custom = { filename: 'custom', title: 'Свой статус', modified: NOW, source: 'cloud' as const, status: 'Архив' };
     const noStatus = { filename: 'none', title: 'Без статуса', modified: NOW, source: 'mixed' as const };
@@ -114,9 +114,35 @@ describe('deriveBoardColumns: pure grouping', () => {
       { status: 'В процессе', cards: [] },
       { status: 'Done', cards: [first, last] },
       { status: 'Архив', cards: [custom] },
-      { status: 'Без статуса', cards: [noStatus, emptyStatus] }
+      { status: 'Без статуса', cards: [emptyStatus, noStatus] }
     ]);
     expect(cards).toEqual(before);
+  });
+
+  it('keeps document dates and descending order when provider timestamps and listing order differ', () => {
+    const locals = ['z-note', 'a-note', 'm-note'].map((filename, index) => ({ ...makeCard(), filename,
+      meta: { id: filename, created: NOW, modified: NOW - index } }));
+    const cached = reconcileBoardCards(locals, []).cards;
+    const refreshed = reconcileBoardCards(locals, [...locals].reverse().map(card => ({ filename: card.filename, modified: NOW + 100 }))).cards;
+    const filenames = (cards: typeof cached) => deriveBoardColumns(cards).find(column => column.status === 'В процессе')?.cards.map(card => card.filename);
+    expect(filenames(cached)).toEqual(['z-note', 'a-note', 'm-note']);
+    expect(filenames(refreshed)).toEqual(filenames(cached));
+  });
+
+  it('sorts newest first across sources, with equal dates by filename and unknown dates last', () => {
+    const base = { title: 'Note', status: 'Done' };
+    const cards = [
+      { ...base, filename: 'unknown-z', source: 'cloud' as const },
+      { ...base, filename: 'equal-z', modified: NOW, source: 'cloud' as const },
+      { ...base, filename: 'oldest', modified: 0, source: 'indexeddb' as const },
+      { ...base, filename: 'newest', modified: NOW + 1, source: 'mixed' as const },
+      { ...base, filename: 'equal-a', modified: NOW, source: 'indexeddb' as const },
+      { ...base, filename: 'unknown-a', source: 'indexeddb' as const }
+    ];
+    for (const input of [Object.freeze(cards), [...cards].reverse()]) {
+      expect(deriveBoardColumns(input).find(column => column.status === 'Done')?.cards.map(card => card.filename))
+        .toEqual(['newest', 'equal-a', 'equal-z', 'oldest', 'unknown-a', 'unknown-z']);
+    }
   });
 
   it.each(['__proto__', 'constructor'])('accepts the custom status %s as data', status => {

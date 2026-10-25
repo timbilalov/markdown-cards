@@ -73,7 +73,8 @@ describe('editor and board share durable synchronization', () => {
     expect(before).toHaveLength(1);
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
     const { loadCardFromCloud } = await import('../stores/cloudStore');
-    expect((await loadCardFromCloud({ name: documentFilename, path: documentFilename }))?.title).toBe('Local pending');
+    expect(await loadCardFromCloud({ name: documentFilename, path: documentFilename }))
+      .toMatchObject({ status: 'loaded', card: { title: 'Local pending' } });
     expect((await db.getCard(v1Card.meta.id))?.title).toBe('Local pending');
     expect(await outbox()).toEqual(before); http.http.assertHandled();
   });

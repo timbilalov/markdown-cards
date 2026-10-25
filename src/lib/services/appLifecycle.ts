@@ -3,7 +3,6 @@ import { initDB } from '../stores/dbStore';
 import { checkIsSessionAuthenticated, isAuthenticated } from '../stores/cloudStore';
 import { refreshCurrentSyncStatus, isOffline } from '../stores/cardStore';
 import { startCardSyncWorker, subscribeSync } from './cardSyncRuntime';
-import { cacheManager } from './cacheManager';
 
 let mounts = 0;
 let generation = 0;
@@ -38,14 +37,8 @@ export function startApplication(): () => void {
         if (stopCloud) return;
         void initializeStorageSession(true).then(session => {
         if (!session.verified || revision !== authRevision || !mounts || current !== generation || stopCloud) return;
-        const controller = new AbortController();
         const stopWorker = startCardSyncWorker();
-        const cacheTimer = setTimeout(() => { void cacheManager.validateCache(controller.signal); }, 5000);
-        const cacheInterval = setInterval(() => { void cacheManager.validateCache(controller.signal); }, 60 * 60 * 1000);
-        stopCloud = () => {
-          controller.abort();
-          clearTimeout(cacheTimer); clearInterval(cacheInterval); stopWorker();
-        };
+        stopCloud = stopWorker;
         }).catch(error => console.error('Storage context initialization failed:', error));
       });
       cleanup = () => {
