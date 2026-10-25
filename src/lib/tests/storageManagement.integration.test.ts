@@ -71,7 +71,17 @@ it('combines all clouds and local contexts without rebinding the normal runtime 
   await normal.saveMarkdownDocument('runtime-only', 'normal runtime source');
   const historical = await historicalContextDatabase();
   await historical.saveMarkdownDocument('local-only', 'exact local raw');
-  const model = await (await import('../services/storageManagement')).loadStorageComparison();
+  const progress = vi.fn();
+  const model = await (await import('../services/storageManagement')).loadStorageComparison(
+    undefined,
+    progress
+  );
+  const total = model.snapshots.reduce(
+    (count, snapshot) => count + (snapshot.status === 'available' ? snapshot.notes.length : 0),
+    0
+  );
+  expect(progress).toHaveBeenCalledWith({ phase: 'reading', completed: 0, total });
+  expect(progress).toHaveBeenLastCalledWith({ phase: 'reading', completed: total, total });
   expect(model?.columns.map(column => column.id)).toEqual(
     expect.arrayContaining([
       'first',

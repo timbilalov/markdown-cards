@@ -2,16 +2,28 @@ import type { StorageSnapshot, StoredNoteSnapshot } from '../domain/storageSync'
 import { checkIsMarkdownFilename } from '../domain/markdownFilename';
 import type { NoteStorageReader } from '../ports/noteStorage';
 
+export interface StorageInventoryProgress {
+  phase: 'listing' | 'reading';
+  completed: number;
+  total: number;
+}
+
 // Complete listings establish absence; failures retain named unreadable copies.
 // One shared pool bounds source reads across all providers and local contexts.
 export async function readStorageInventory(
   sources: readonly (NoteStorageReader | { id: string; unavailable: true })[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: (progress: StorageInventoryProgress) => void
 ): Promise<StorageSnapshot[]> {
+  const publish = (progress: StorageInventoryProgress) => {
+    if (!signal?.aborted) onProgress?.(progress);
+  };
+  let listedCount = 0;
+  publish({ phase: 'listing', completed: 0, total: sources.length });
   const listed = await Promise.all(
     sources.map(async source => {
-      if ('unavailable' in source || signal?.aborted) return null;
       try {
+        if ('unavailable' in source || signal?.aborted) return null;
         const result = await source.list();
         if (signal?.aborted || result.status !== 'success') return null;
         const paths = new Set<string>();
@@ -22,6 +34,8 @@ export async function readStorageInventory(
         return { source, entries: result.entries };
       } catch {
         return null;
+      } finally {
+        publish({ phase: 'listing', completed: ++listedCount, total: sources.length });
       }
     })
   );
@@ -42,6 +56,8 @@ export async function readStorageInventory(
       : []
   );
   let next = 0;
+  let completed = 0;
+  publish({ phase: 'reading', completed, total: tasks.length });
   await Promise.all(
     Array.from({ length: Math.min(4, tasks.length) }, async () => {
       while (!signal?.aborted) {
@@ -70,6 +86,8 @@ export async function readStorageInventory(
           }
         } catch {
           /* The known filename stays unavailable; other reads continue. */
+        } finally {
+          publish({ phase: 'reading', completed: ++completed, total: tasks.length });
         }
       }
     })

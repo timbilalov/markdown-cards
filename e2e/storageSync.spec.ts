@@ -128,6 +128,94 @@ async function select(page: Page, source: string, targets: string[], path = '') 
   await expect(page.locator('[data-sync-preview]')).toBeVisible();
 }
 
+test('blocks the interface and reports loading progress on entry, refresh and after synchronization', async ({
+  page
+}, info) => {
+  await login(page);
+  const listing = Promise.withResolvers<void>();
+  const copying = Promise.withResolvers<void>();
+  const copyStarted = Promise.withResolvers<void>();
+  const downloads: (() => void)[] = [];
+  let allowDownloads = false;
+  await page.route(url => /^\/api\/storages\/[^/]+\/files$/.test(url.pathname), async route => {
+    await listing.promise;
+    await route.fallback();
+  });
+  await page.route(url => /^\/api\/storages\/[^/]+\/download$/.test(url.pathname), async route => {
+    if (!allowDownloads) {
+      const gate = Promise.withResolvers<void>();
+      downloads.push(() => gate.resolve());
+      await gate.promise;
+    }
+    await route.fallback();
+  });
+  await page.route(url => /^\/api\/storages\/[^/]+\/copy$/.test(url.pathname), async route => {
+    copyStarted.resolve();
+    await copying.promise;
+    await route.fallback();
+  });
+  const dialog = page.getByRole('dialog', { name: 'Обновление хранилищ', exact: true });
+  const progress = dialog.getByRole('progressbar');
+  const releaseDownloads = () => {
+    allowDownloads = true;
+    downloads.splice(0).forEach(release => release());
+  };
+  try {
+    await page.getByRole('link', { name: 'Хранилища', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Получаем списки файлов');
+    await expect(progress).not.toHaveAttribute('value');
+    expect(await dialog.evaluate(element => element.matches(':modal'))).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeVisible();
+    await page.getByRole('link', { name: 'Home', exact: true }).evaluate(element => element.focus());
+    expect(await dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+    await expect(page.getByRole('button', { name: 'Обновить версии', exact: true })).toBeDisabled();
+
+    listing.resolve();
+    await expect.poll(() => downloads.length).toBe(4);
+    await expect(dialog).toContainText('Обработано копий:');
+    const before = Number(await progress.getAttribute('value'));
+    downloads.shift()!();
+    await expect.poll(async () => Number(await progress.getAttribute('value'))).toBeGreaterThan(before);
+    await page.screenshot({ path: info.outputPath('storage-loading.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bounds = await dialog.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: info.outputPath('storage-loading-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    releaseDownloads();
+    await expect(dialog).not.toBeVisible();
+
+    allowDownloads = false;
+    await page.getByRole('button', { name: 'Обновить версии', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(progress).toHaveAttribute('value', /\d+/);
+    releaseDownloads();
+    await expect(dialog).not.toBeVisible();
+
+    await select(page, 'disk', ['dropbox'], 'note.md');
+    await page.getByRole('button', { name: 'Выполнить синхронизацию', exact: true }).click();
+    await expect(dialog).toContainText('Синхронизируем заметки');
+    await expect(progress).not.toHaveAttribute('value');
+    await copyStarted.promise;
+    allowDownloads = false;
+    copying.resolve();
+    await expect(dialog).toContainText('Обработано копий:');
+    await expect(progress).toHaveAttribute('value', /\d+/);
+    expect(await dialog.evaluate(element => element.matches(':modal'))).toBe(true);
+    releaseDownloads();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Обновить версии', exact: true })).toBeEnabled();
+    await expect(page.getByText('Записано', { exact: true })).toBeVisible();
+  } finally {
+    listing.resolve();
+    copying.resolve();
+    releaseDownloads();
+  }
+});
+
 test('compares three clouds and local cache, then explicitly replaces latest Dropbox with an older local reference', async ({
   page
 }, info) => {

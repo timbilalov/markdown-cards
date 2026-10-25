@@ -5,7 +5,10 @@ import { buildNoteInventory } from '../domain/storageSync';
 import type { NoteStorage, NoteStorageReader } from '../ports/noteStorage';
 import { BrowserCloudStorage } from '../adapters/browserCloudStorage';
 import { LocalNoteStorage } from '../adapters/localNoteStorage';
-import { readStorageInventory } from '../application/storageInventory';
+import {
+  readStorageInventory,
+  type StorageInventoryProgress
+} from '../application/storageInventory';
 import { parseStorageCatalog } from './storageCatalog';
 import { listLocalStorageContexts, rememberStorageContexts } from './storageSession';
 import { cloudRequestSignal } from '../utils/cloudRequestSignal';
@@ -29,7 +32,10 @@ export interface StorageComparison {
   storages: Map<string, NoteStorage>;
 }
 
-export async function loadStorageComparison(signal?: AbortSignal): Promise<StorageComparison> {
+export async function loadStorageComparison(
+  signal?: AbortSignal,
+  onProgress?: (progress: StorageInventoryProgress) => void
+): Promise<StorageComparison> {
   if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
   const authentication = sessionGeneration();
   let catalog: ReturnType<typeof parseStorageCatalog> = null;
@@ -131,7 +137,7 @@ export async function loadStorageComparison(signal?: AbortSignal): Promise<Stora
       }
     });
   }
-  const snapshots = await readStorageInventory(sources, signal);
+  const snapshots = await readStorageInventory(sources, signal, onProgress);
   return {
     catalogError: catalog
       ? null

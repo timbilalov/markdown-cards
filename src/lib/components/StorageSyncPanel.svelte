@@ -10,8 +10,15 @@
   import { storageLocationLabel } from '$lib/utils/storageLocationLabel';
   import { orderStorageColumns } from '$lib/utils/storageColumnOrder';
 
-  let { model, oncomplete }: { model: StorageComparison; oncomplete: () => Promise<void> } =
-    $props();
+  let {
+    model,
+    oncomplete,
+    onbusy = () => {}
+  }: {
+    model: StorageComparison;
+    oncomplete: () => Promise<void>;
+    onbusy?: (busy: boolean) => void;
+  } = $props();
   let source = $state('');
   let path = $state('');
   let targets = $state<string[]>([]);
@@ -165,6 +172,7 @@
     const submitted = $state.snapshot(queue);
     clearQueue();
     busy = true;
+    onbusy(true);
     error = null;
     results = [];
     try {
@@ -178,6 +186,7 @@
         'Не удалось завершить проверку результата. Обновите версии и проверьте журнал перед повтором.';
     } finally {
       busy = false;
+      onbusy(false);
     }
   }
 
@@ -185,6 +194,7 @@
     if (busy) return;
     const captured = $state.snapshot(operation);
     busy = true;
+    onbusy(true);
     error = null;
     try {
       const result = dismiss
@@ -211,6 +221,7 @@
       error = 'Журнал недоступен. Блокировка записи остаётся.';
     } finally {
       busy = false;
+      onbusy(false);
     }
   }
 

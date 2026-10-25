@@ -1,5 +1,8 @@
 import { expect, it, vi } from 'vitest';
-import { readStorageInventory } from '../application/storageInventory';
+import {
+  readStorageInventory,
+  type StorageInventoryProgress
+} from '../application/storageInventory';
 import { MemoryCloudStorage } from './helpers/memoryCloudStorage';
 import type { CloudDocument } from '../ports/cloudStorage';
 import type { NoteStorageReader } from '../ports/noteStorage';
@@ -9,6 +12,91 @@ const present = (path = 'note.md', source = 'raw') => ({ path, source, revision:
 function reader(id: string, notes: CloudDocument[] = [present()]): NoteStorageReader {
   return Object.assign(new MemoryCloudStorage({ documents: notes }), { id });
 }
+
+it('counts every listed copy across storages, including failed reads, as it finishes', async () => {
+  const cloud = reader('cloud', [present('first.md'), present('broken.md')]);
+  const local = reader('local', [present('first.md')]);
+  const gates = Array.from({ length: 3 }, () => Promise.withResolvers<void>());
+  const started = Promise.withResolvers<void>();
+  let reads = 0;
+  for (const source of [cloud, local]) {
+    source.read = async path => {
+      const gate = gates[reads++];
+      if (reads === 3) started.resolve();
+      await gate.promise;
+      if (path === 'broken.md') throw new Error('network');
+      return { status: 'found', document: present(path) };
+    };
+  }
+  const progress: StorageInventoryProgress[] = [];
+  const loading = readStorageInventory(
+    [cloud, local, { id: 'offline', unavailable: true }],
+    undefined,
+    value => progress.push(value)
+  );
+  try {
+    await started.promise;
+    expect(progress.filter(value => value.phase === 'listing')).toEqual(
+      [0, 1, 2, 3].map(completed => ({ phase: 'listing', completed, total: 3 }))
+    );
+    expect(progress.at(-1)).toEqual({ phase: 'reading', completed: 0, total: 3 });
+    gates[1].resolve();
+    await vi.waitFor(() =>
+      expect(progress.at(-1)).toEqual({ phase: 'reading', completed: 1, total: 3 })
+    );
+    gates[2].resolve();
+    await vi.waitFor(() =>
+      expect(progress.at(-1)).toEqual({ phase: 'reading', completed: 2, total: 3 })
+    );
+    gates[0].resolve();
+    const snapshots = await loading;
+    expect(progress.at(-1)).toEqual({ phase: 'reading', completed: 3, total: 3 });
+    expect(snapshots[0]).toMatchObject({
+      notes: [{ status: 'present' }, { path: 'broken.md', status: 'unavailable' }]
+    });
+  } finally {
+    gates.forEach(gate => gate.resolve());
+    await loading;
+  }
+});
+
+it('finishes progress for empty or unavailable listings without inventing reads', async () => {
+  const broken = reader('broken');
+  broken.list = async () => { throw new Error('network'); };
+  const progress = vi.fn();
+  await readStorageInventory([reader('empty', []), broken], undefined, progress);
+  expect(progress.mock.calls.map(([value]) => value)).toEqual([
+    { phase: 'listing', completed: 0, total: 2 },
+    { phase: 'listing', completed: 1, total: 2 },
+    { phase: 'listing', completed: 2, total: 2 },
+    { phase: 'reading', completed: 0, total: 0 }
+  ]);
+});
+
+it('stops publishing progress when an in-flight load is cancelled', async () => {
+  const source = reader('cloud');
+  const started = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
+  source.read = async path => {
+    started.resolve();
+    await gate.promise;
+    return { status: 'found', document: present(path) };
+  };
+  const controller = new AbortController();
+  const progress = vi.fn();
+  const loading = readStorageInventory([source], controller.signal, progress);
+  try {
+    await started.promise;
+    controller.abort();
+    progress.mockClear();
+    gate.resolve();
+    await loading;
+    expect(progress).not.toHaveBeenCalled();
+  } finally {
+    gate.resolve();
+    await loading;
+  }
+});
 
 it('reads any number of sources and keeps exact unsupported Markdown, revisions and source order', async () => {
   const sources = [
